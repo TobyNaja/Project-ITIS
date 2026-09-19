@@ -1,2 +1,30 @@
+# Python bytecode
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# Test cache
+.pytest_cache/
+
+# Secrets — NEVER commit real values (use .env.example as template)
+.env
+
+# SSH keys / certs
+*.pem
+*id_ed25519*
+!*.pub
+
+# Logs / local data dumps
+*.log
+eve.json
+*.jsonl
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

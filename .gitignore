@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# Env / secrets — NEVER commit real values
+.env
+*.pem
+*id_ed25519*
+!*.pub
+
+# Logs / local data dumps
+*.log
+eve.json
+*.jsonl
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

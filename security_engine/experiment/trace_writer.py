@@ -41,8 +41,19 @@ class TraceWriter:
             "logged_at": datetime.now(timezone.utc).isoformat(),
             "scenario_id": scenario_id,
             "trial_no": trial_no,
+            # กฎเหล็ก: ทุก record ต้องมี input_mode ระดับ top-level
+            # (กัน synthetic ปน real) — write() เลือก field เองจึงต้องยกมาใส่ตรงนี้
+            # trace มาก่อน (run_experiment แนบก่อน write), ตกไปใช้ experiment metadata
+            "input_mode": trace.get("input_mode") or self.experiment.get("input_mode"),
             # experiment params (block_duration ฯลฯ) เพื่อ reproduce ได้
             **{f"exp_{k}": v for k, v in self.experiment.items()},
+            # trial outcome — ต้อง persist เพื่อรายงาน infra failure จาก JSONL
+            # (write() เลือก field เอง; ไม่ยกมาใส่ตรงนี้ = หายตอนเขียนไฟล์)
+            # FAILED trace ไม่มี latency fields -> analyzer exclude เองจาก trial_status
+            "trial_status": trace.get("trial_status"),
+            "enforcement_ok": trace.get("enforcement_ok"),
+            "retry_count": trace.get("retry_count"),
+            "error": trace.get("error"),
             # ผล decision + latency
             "src_ip": trace.get("src_ip"),
             "correlation_matched": trace.get("correlation_matched"),
@@ -52,7 +63,6 @@ class TraceWriter:
             **compute_latencies(trace),
         }
         line = json.dumps(record, default=str)
-        # append ทีละบรรทัด thread-safe (main thread เขียน; ไม่ชนกับ runner)
         with self._lock:
             with open(self.path, "a", encoding="utf-8") as f:
                 f.write(line + "\n")

@@ -22,6 +22,8 @@ ENV/
 *.log
 eve.json
 *.jsonl
+!docs/evidence/**/*.jsonl
+data/*.db
 
 # OS / editors
 .DS_Store

@@ -1,0 +1,29 @@
+# config/config.yaml — ITIS system configuration (NFR-01: ห้าม hardcode ค่าระบบ)
+#
+# ค่าเฉพาะเครื่อง/ความลับ ไม่อยู่ในไฟล์นี้ (NFR-07):
+#   ITIS_PFSENSE_HOST  = environment variable (required ตอนรันจริง)
+#   ITIS_EVE_PATH      = environment variable (optional — override eve.path ด้านล่าง)
+
+system:
+  db_path: "data/experiment.db"
+  log_path: "logs/engine.log"
+
+eve:
+  path: ""                        # เว้นว่างได้ — ตั้งที่นี่หรือ override ด้วย ITIS_EVE_PATH
+
+correlation:
+  window_sec: 10                  # §3.5 / FR-03
+  min_events: 5
+
+block:
+  duration_sec: 300               # §3.6 RULE-001 block_duration_sec
+
+health:
+  check_interval_sec: 15          # FR-12
+  stats_freshness_multiplier: 3   # FR-12: stats ใหม่ภายใน stats_interval × N
+
+recovery:
+  max_attempts: 3                 # FR-13: retry สูงสุด 3 ครั้ง
+
+risk:
+  weight_set: "A"                 # §3.5 Weight Set A/B/C

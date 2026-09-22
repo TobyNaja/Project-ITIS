@@ -1,0 +1,32 @@
+# config/rules.yaml — Decision Rules ตาม Blueprint §3.6 (ล็อกแล้ว)
+#
+# STEP 1: ไฟล์นี้เป็น configuration artifact เท่านั้น
+#         RuleEngine ยังไม่โหลดไฟล์นี้ — จะเปลี่ยนเป็น YAML-driven ใน STEP 3
+#         (ดู docs/blueprint-alignment-plan.md)
+
+rules:
+  - id: "RULE-003"                # ประเมินก่อนเสมอ (highest priority)
+    priority: 1
+    condition:
+      source_in_allowlist: true
+    action: "NO_AUTO_BLOCK"       # + ALERT + AUDIT, risk score คงเดิม
+
+  - id: "RULE-001"
+    priority: 2
+    condition:
+      min_severity: "HIGH"        # Suricata severity 1
+      min_same_src_events: 5
+      max_time_window_sec: 10
+      source_in_allowlist: false
+    action: "BLOCK"
+    block_duration_sec: 300
+
+  - id: "RULE-002"
+    priority: 3
+    condition:
+      min_severity: "MEDIUM"
+      min_same_src_events: 5
+      max_time_window_sec: 10
+    action: "ALERT"
+
+default_action: "MONITOR"

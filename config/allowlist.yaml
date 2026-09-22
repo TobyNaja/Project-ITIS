@@ -1,0 +1,9 @@
+# config/allowlist.yaml — Protected source IPs (Blueprint §3.3)
+#
+# STEP 1: ไฟล์นี้เป็น configuration artifact เท่านั้น
+#         runtime ยังอ่าน config/allowlist.txt อยู่ — parser จะเปลี่ยนเป็น YAML
+#         ใน STEP 3 แล้วค่อยลบ allowlist.txt (ดู docs/blueprint-alignment-plan.md)
+#
+# default policy = ว่าง: ไม่มี source IP ใดถูกยกเว้นจาก auto-block
+
+allowlist: []

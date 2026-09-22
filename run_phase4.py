@@ -9,15 +9,22 @@ Correlation/Risk/Rule/Lifecycle อยู่ในนี้ (อยู่ใน 
     for event in stream_events(): pipeline.process(event)   [main thread]
     finally: runner.stop()                                    [shutdown สะอาด]
 
-รันจริงบน SEC01/คอมหลัก (ต่อ pfSense + Suricata) = Phase 12 — ต้องตั้ง env ก่อน:
-    $env:ITIS_PFSENSE_HOST = "admin@..."
-    $env:ITIS_EVE_PATH     = "/var/log/suricata/<iface>/eve.json"
+ค่าระบบทั้งหมดมาจาก config/config.yaml (NFR-01) ผ่าน security_engine.settings
+ส่วนค่าเฉพาะเครื่องมาจาก environment (NFR-07):
+    $env:ITIS_PFSENSE_HOST = "admin@..."          # required
+    $env:ITIS_EVE_PATH     = "/var/log/..."       # optional — override eve.path
 ไฟล์นี้แยก build_pipeline() ออกจาก main() เพื่อให้ wiring test ประกอบระบบได้
 โดยไม่ต้องรัน loop จริง
 """
-import os
 import threading
 
+from security_engine.settings import (          # re-export: ของเดิมที่อ้าง
+    ConfigError,                                # run_phase4.ConfigError /
+    ENV_EVE_PATH,                               # run_phase4.require_env ยังใช้ได้
+    ENV_PFSENSE_HOST,
+    load_settings,
+    require_env,
+)
 from security_engine.ingestion.eve_reader import stream_events
 from security_engine.correlation.engine import CorrelationEngine
 from security_engine.policy.rule_engine import RuleEngine
@@ -28,37 +35,22 @@ from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
 from security_engine.lifecycle.runner import LifecycleRunner
 from security_engine.pipeline import SecurityPipeline
 
-# ---- runtime config (machine-specific -> environment เท่านั้น ห้าม hard-code lab) ----
-ENV_PFSENSE_HOST = "ITIS_PFSENSE_HOST"
-ENV_EVE_PATH = "ITIS_EVE_PATH"
-
-# ---- application default (policy/ไฟล์ของ project ไม่ใช่ค่าของเครื่อง) ----
+# ---- fallback default ของ build_pipeline (ค่าจริงตอนรันมาจาก config.yaml) ----
+# STEP 1: allowlist ยังเป็น .txt — จะย้ายไป config/allowlist.yaml ใน STEP 3
 ALLOWLIST_PATH = "config/allowlist.txt"
 DB_PATH = "data/security_engine.db"
 MIN_EVENTS = 5
 WINDOW_MAX = 10.0
-EXPIRE_INTERVAL = 1.0
 
-
-class ConfigError(Exception):
-    """environment variable ที่จำเป็นไม่ได้ตั้งไว้"""
-
-
-def require_env(name: str) -> str:
-    """อ่าน env ที่จำเป็น — ไม่มีหรือว่าง = พังทันที
-    (fail fast ดีกว่าปล่อยให้ไป ssh ผิดเครื่อง/อ่านไฟล์ผิดตัวแล้วค่อยรู้)"""
-    value = os.environ.get(name, "").strip()
-    if not value:
-        raise ConfigError(
-            f"ต้องตั้ง environment variable {name} ก่อนรัน "
-            f'(เช่น $env:{name} = "..." — ดูตัวอย่างใน .env.example)'
-        )
-    return value
+# block-expiry polling interval เป็น implementation-level scheduler parameter
+# ไม่ใช่ Blueprint experiment/configuration parameter จึงไม่อยู่ใน config.yaml
+# (ห้ามเอา health.check_interval_sec=15 มาใช้แทน — คนละความหมาย)
+EXPIRE_INTERVAL_SEC = 1.0
 
 
 def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
-                   window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL,
+                   window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
                    enforcer=None, correlator=None):
     """
     ประกอบ component ทั้งหมด -> คืน (pipeline, runner, shared_lock)
@@ -111,10 +103,16 @@ def run(pipeline, runner, event_source):
 
 
 def main():
-    # อ่าน config ให้ครบก่อน -> env หายจะพังก่อนแตะ pfSense หรือสร้างไฟล์ db
-    host = require_env(ENV_PFSENSE_HOST)
-    eve_path = require_env(ENV_EVE_PATH)
-    pipeline, runner, _ = build_pipeline(host=host)
+    # อ่าน+validate config ให้ครบก่อน -> ค่าหาย/เสียจะพังก่อนแตะ pfSense หรือสร้าง db
+    settings = load_settings()
+    host = settings.pfsense_host()          # environment เท่านั้น (NFR-07)
+    eve_path = settings.require_eve_path()  # config.yaml หรือ ITIS_EVE_PATH
+    pipeline, runner, _ = build_pipeline(
+        host=host,
+        db_path=settings.system.db_path,
+        min_events=settings.correlation.min_events,
+        window_max=float(settings.correlation.window_sec),
+    )
     run(pipeline, runner, stream_events(host, eve_path))
 
 

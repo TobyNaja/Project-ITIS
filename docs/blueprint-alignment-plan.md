@@ -59,6 +59,16 @@ config layer  →  core logic  →  persistence  →  runtime features  →  exp
 | exit criteria | `python -c "from security_engine.settings import load_config; load_config()"` ผ่าน และลบ key ใดออกแล้ว raise |
 | ปิด | **NFR-01**, ส่วน config ของ §3.3 |
 
+**บันทึกการตัดสินใจใน STEP 1**
+
+- `EXPIRE_INTERVAL_SEC` (block-expiry polling) **ไม่เข้า `config.yaml`** — เป็น implementation-level
+  scheduler parameter ไม่ใช่ Blueprint experiment/configuration parameter
+  และห้ามเอา `health.check_interval_sec=15` (FR-12) มาใช้แทนเพราะคนละความหมาย
+- `config/rules.yaml` และ `config/allowlist.yaml` สร้างเป็น configuration artifact เท่านั้นใน STEP 1
+  runtime ยังอ่าน rules ที่ hardcode และ `config/allowlist.txt` จนถึง STEP 3
+- `security_engine/experiment/experiment_config.py` มีค่าซ้ำกับ `config.yaml` โดยตั้งใจ
+  (`CORRELATION_WINDOW` / `MIN_EVENTS` / `PROD_BLOCK_DURATION`) — จะรวมศูนย์ใน STEP 10
+
 ## STEP 2 — Risk Model v1 ให้ตรง §3.5
 
 | | |

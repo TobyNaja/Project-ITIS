@@ -8,6 +8,12 @@ security_engine/experiment/experiment_config.py — Phase 12.9 Experiment Config
     ไม่แก้ค่าหลักของระบบ (production block_duration ยังเป็น 300s)
 """
 from dataclasses import dataclass, asdict
+
+# NOTE (Blueprint alignment, STEP 1): ค่าคงที่ด้านล่างซ้ำกับ config/config.yaml
+# (correlation.window_sec / correlation.min_events / block.duration_sec) โดยตั้งใจ
+# — configuration alignment ของสาย experiment จะทำใน STEP 10 ตาม
+# docs/blueprint-alignment-plan.md ไม่ใช่ความซ้ำที่หลุดโดยไม่รู้ตัว
+
 # ---- production default (ค่าจริงของระบบ ห้ามแก้เพื่อ experiment) ----
 PROD_BLOCK_DURATION = 300
 CORRELATION_WINDOW = 10        # min_events window (ล็อก)

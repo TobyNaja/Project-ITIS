@@ -16,20 +16,30 @@ security_engine/pipeline.py — Phase 11.2 SecurityPipeline
 import time
 import threading
 
-from security_engine.scoring.risk import assess
+from security_engine.models import CorrelationPattern
+from security_engine.policy.source_context import UnknownSourceContextResolver
+from security_engine.scoring.risk import calculate, DEFAULT_WEIGHT_SET
 from security_engine.policy.rule_engine import BLOCK
 
 
 class SecurityPipeline:
     def __init__(self, correlator, rule_engine, lifecycle,
-                 lock=None, min_events=5, window_max=10.0, trace_sink=None):
+                 lock=None, min_events=5, window_max=10.0, trace_sink=None,
+                 source_context_resolver=None, weight_set=DEFAULT_WEIGHT_SET):
         self.correlator = correlator
         self.rule_engine = rule_engine
         self.lifecycle = lifecycle
         # lock ตัวเดียวกับที่ LifecycleRunner ใช้ — Pipeline เป็นเจ้าของ concurrency
         self.lock = lock or threading.Lock()
+        # min_events/window_max เป็นค่าของ CorrelationEngine — Risk Model v1 ไม่ใช้แล้ว
+        # (factor T เป็น absolute lookup ตาม §3.5) เก็บไว้เพื่อไม่ให้ caller เดิมพัง
         self.min_events = min_events
         self.window_max = window_max
+        # resolver ของ factor C — default = ถือว่าทุก source เป็น unknown/external
+        # ต้องแทนด้วยตัวที่อ่าน asset list จริงใน STEP 2B
+        self.source_context_resolver = (
+            source_context_resolver or UnknownSourceContextResolver())
+        self.weight_set = weight_set
         # trace_sink: callable(trace) optional — เขียน trace ลง JSONL สำหรับ experiment
         # default None = คืน trace เฉยๆ (test เดิมไม่กระทบ)
         self.trace_sink = trace_sink
@@ -59,11 +69,13 @@ class SecurityPipeline:
         trace["t1_correlated"] = time.monotonic()
 
         # --- Risk ---
-        risk = assess(match, min_events=self.min_events, window_max=self.window_max)
+        pattern = CorrelationPattern.from_dict(match)
+        source_context = self.source_context_resolver.resolve(pattern.src_ip)
+        risk = calculate(pattern, source_context, weight_set=self.weight_set)
         trace["t2_risk"] = time.monotonic()
 
         # --- Rule ---
-        decision = self.rule_engine.decide(risk, match)
+        decision = self.rule_engine.decide(risk, pattern)
         trace["t3_decision"] = time.monotonic()
         trace["decision"] = decision.action
 

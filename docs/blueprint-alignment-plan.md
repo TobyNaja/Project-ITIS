@@ -82,6 +82,46 @@ config layer  →  core logic  →  persistence  →  runtime features  →  exp
 
 **หมายเหตุ boundary:** `factor_context` ต้องรู้จัก allowlist + asset list ทำให้ `risk.py` รับ input ใหม่
 ไม่ขัด D4 (allowlist ไม่ลบ risk score — C=0 กระทบแค่ 15% ของสูตร) แต่เป็นการเปลี่ยน module boundary ที่ต้องตั้งใจ
+**แก้โดยไม่ให้ `risk.py` โหลดไฟล์เอง**: resolve เป็น `SourceContext` จากภายนอกแล้ว inject เข้า
+`calculate(pattern, source_context, weight_set)` (dependency injection)
+
+### STEP 2A — Risk Model alignment (ทำแล้ว)
+
+`security_engine/models.py` (`CorrelationPattern`, `SourceContext`) ·
+`security_engine/policy/source_context.py` (Protocol + static/unknown resolver) ·
+`risk.py` ใช้ lookup ตาม §3.5 + Weight Set A/B/C · `tests/test_sensitivity.py`
+
+**Semantic ที่ล็อกแล้ว (หลักฐาน: §5 Step 5.1 "Context จาก asset/allowlist status" + §3.5
+"Known Asset = อยู่ใน asset list ของ Lab (มีโอกาส FP สูง)" + golden case 79.5)**
+
+```
+Factor C = SOURCE context        allowlisted -> 0 | known lab asset -> 30 | unknown/external -> 80
+```
+allowlist มีผลสองชั้นโดยตั้งใจ: ลด C ในชั้น Risk (ไม่ทำให้ score เป็น 0) และเป็น safety
+override ที่ RULE-003 ในชั้น Rule Engine — Risk ≠ Decision
+
+**Golden case ที่ต้องผ่านเสมอ**: S=75 F=70 T=100 C=80 ด้วย Set A -> **79.5 -> HIGH**
+
+**Sensitivity finding (เก็บไว้สำหรับ Report ไม่ใช่ bug)**: pattern เดียวกัน
+Set A=79.5 HIGH · Set B=80.5 CRITICAL · Set C=78.5 HIGH — ข้าม threshold 80 ที่ Set B
+แต่ decision เป็น BLOCK ทั้งสาม set เพราะ RULE-001 ครอบ "HIGH หรือสูงกว่า"
+
+### STEP 2B — Asset discovery + resolver integration (ยังไม่ทำ, รอ lab online)
+
+**Known limitation ของ STEP 2A ที่ต้องปิดใน 2B:**
+
+- `UnknownSourceContextResolver` เป็น **temporary fallback** ไม่ใช่ production asset
+  classification — ถือว่าทุก source เป็น unknown/external (C=80) ซึ่ง conservative
+  (ไม่ลดความเสี่ยงให้ใครเพราะขาดข้อมูล) แต่ไม่ใช่ความจริงของ lab
+- **`run_experiment.py` ยังไม่ส่ง resolver เข้า `SecurityPipeline`** ดังนั้นถ้ารัน experiment
+  ตอนนี้ scenario allowlisted (A4/T5) จะได้ **C=80 -> risk 79.5** แทนที่จะเป็น
+  **C=0 -> risk 67.5** — decision ยังถูก (RULE-003 จับ allowlist เอง) แต่ **risk evidence จะผิด**
+  จึงห้ามใช้ผล risk จาก runner ปัจจุบันเป็นหลักฐานของ Phase 14
+- ลำดับที่ต้องทำ: สำรวจ asset จริงของ lab -> `config/assets.yaml` -> resolver ที่อ่าน
+  assets.yaml + allowlist -> ต่อเข้า `run_experiment.py` และ `run_phase4.py` -> integration validation
+
+*Integrate SourceContextResolver into the experiment runner after assets.yaml is
+established from actual lab asset discovery.*
 
 ## STEP 3 — Rule engine อ่าน `rules.yaml`
 

@@ -1,151 +1,230 @@
 """
-tests/test_risk.py — Unit test สำหรับ Phase 5 Risk Engine
-รัน: python3 -m pytest tests/test_risk.py -v
-หรือ: python3 -m unittest tests.test_risk -v
+tests/test_risk.py — Risk Model v1 (Blueprint §3.5 — ล็อกแล้ว)
 
-ยึด Phase 5 Specification ที่ล็อกไว้:
-  Severity:  Suricata 1→75, 2→50, 3→25, 0/custom→100
-  Level:     0–29 LOW | 30–59 MEDIUM | 60–79 HIGH | 80–100 CRITICAL
-  C:         Target Concentration = max_dest_count / total × 100
+normalize table ที่ต้องตรงเป๊ะ:
+    S  sev 1→75, 2→50, 3→25, custom critical (0)→100
+    F  1→20, 2–3→40, 4–5→70, >5→100
+    T  ≤10s→100, ≤30s→75, ≤60s→50, >60s→25     (absolute — ไม่ผูกกับ correlation window)
+    C  allowlisted→0, known asset→30, unknown/external→80
+
+golden case ของ Blueprint: S=75 F=70 T=100 C=80 ด้วย Set A -> 79.5 -> HIGH
 """
-import unittest
+from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from security_engine.models import CorrelationPattern, SourceContext
 from security_engine.scoring.risk import (
-    assess, risk_level,
-    factor_severity, factor_frequency, factor_temporal,
-    factor_target_concentration,
-    W_SEVERITY, W_FREQUENCY, W_TEMPORAL, W_TARGET_CONCENTRATION,
+    calculate, risk_level,
+    factor_severity, factor_frequency, factor_temporal, factor_context,
+    WEIGHT_SETS, SEVERITY_SCORE,
 )
 
+T0 = datetime(2026, 9, 22, 10, 0, 0, tzinfo=timezone.utc)
 
-def make_events(n, severity=1, dest_ip="192.168.1.11"):
-    """สร้าง normalized events n ตัว ยิงเป้าเดียวกันหมด"""
-    return [
-        {"src_ip": "192.168.2.10", "dest_ip": dest_ip,
-         "severity": severity, "signature_id": 1000001}
-        for _ in range(n)
-    ]
+UNKNOWN = SourceContext(allowlisted=False, known_asset=False)
+KNOWN = SourceContext(allowlisted=False, known_asset=True)
+ALLOWED = SourceContext(allowlisted=True, known_asset=False)
 
-
-class TestFactors(unittest.TestCase):
-    def test_severity_high_is_75(self):
-        # Suricata sev 1 = HIGH -> 75 (ไม่ใช่ 100)
-        self.assertEqual(factor_severity(make_events(5, severity=1)), 75.0)
-
-    def test_severity_medium_is_50(self):
-        self.assertEqual(factor_severity(make_events(5, severity=2)), 50.0)
-
-    def test_severity_low_is_25(self):
-        self.assertEqual(factor_severity(make_events(5, severity=3)), 25.0)
-
-    def test_severity_critical_is_100(self):
-        # sev 0 = custom/critical -> 100
-        self.assertEqual(factor_severity(make_events(5, severity=0)), 100.0)
-
-    def test_severity_uses_worst(self):
-        # มี sev 3 กับ sev 1 ปนกัน -> ต้องเอา 1 (รุนแรงสุด) = 75
-        events = [{"severity": 3, "dest_ip": "x"},
-                  {"severity": 1, "dest_ip": "x"}]
-        self.assertEqual(factor_severity(events), 75.0)
-
-    def test_severity_empty(self):
-        self.assertEqual(factor_severity([]), 0.0)
-
-    def test_frequency_exact_min_is_100(self):
-        self.assertEqual(factor_frequency(5, min_events=5), 100.0)
-
-    def test_frequency_clamped_over_min(self):
-        self.assertEqual(factor_frequency(10, min_events=5), 100.0)
-
-    def test_temporal_zero_window_is_100(self):
-        self.assertAlmostEqual(factor_temporal(0.0, window_max=10.0), 100.0)
-
-    def test_temporal_half_window_is_50(self):
-        self.assertAlmostEqual(factor_temporal(5.0, window_max=10.0), 50.0)
-
-    def test_temporal_full_window_zero(self):
-        self.assertAlmostEqual(factor_temporal(10.0, window_max=10.0), 0.0)
-
-    def test_temporal_over_window_clamped_zero(self):
-        self.assertAlmostEqual(factor_temporal(15.0, window_max=10.0), 0.0)
-
-    def test_temporal_scenario_value(self):
-        # window 4.2s -> (10-4.2)/10*100 = 58
-        self.assertAlmostEqual(factor_temporal(4.2, window_max=10.0), 58.0, places=1)
-
-    def test_concentration_single_dest_is_100(self):
-        self.assertEqual(factor_target_concentration(make_events(5)), 100.0)
-
-    def test_concentration_3a_2b_is_60(self):
-        # 3 events -> IP A, 2 events -> IP B -> max=3, total=5 -> 60
-        events = ([{"dest_ip": "10.0.0.1"}] * 3) + ([{"dest_ip": "10.0.0.2"}] * 2)
-        self.assertEqual(factor_target_concentration(events), 60.0)
-
-    def test_concentration_all_different_is_20(self):
-        # 5 events -> 5 เป้าต่างกัน -> max=1, total=5 -> 20
-        events = [{"dest_ip": f"10.0.0.{i}"} for i in range(5)]
-        self.assertEqual(factor_target_concentration(events), 20.0)
-
-class TestAssess(unittest.TestCase):
-    def test_weights_sum_to_one(self):
-        self.assertAlmostEqual(
-            W_SEVERITY + W_FREQUENCY + W_TEMPORAL + W_TARGET_CONCENTRATION, 1.0
-        )
-    def test_scenario_high(self):
-        # เคสจริง: 5 events, HIGH (sev 1), window 4.2s, เป้าเดียว
-        corr = {
-            "src_ip": "192.168.2.10",
-            "event_count": 5,
-            "window_seconds": 4.2,
-            "events": make_events(5, severity=1),
-        }
-        r = assess(corr, min_events=5, window_max=10.0)
-        # S=75, F=100, T=58, C=100
-        # R = 30 + 25 + 11.6 + 15 = 81.6
-        self.assertEqual(r.factors["S"], 75.0)
-        self.assertEqual(r.factors["F"], 100.0)
-        self.assertAlmostEqual(r.factors["T"], 58.0, places=1)
-        self.assertEqual(r.factors["C"], 100.0)
-        self.assertAlmostEqual(r.risk_score, 81.6, places=1)
-        self.assertEqual(r.risk_level, "CRITICAL")
-
-    def test_manual_formula_matches(self):
-        corr = {
-            "src_ip": "1.1.1.1",
-            "event_count": 5,
-            "window_seconds": 5.0,      # T = 50
-            "events": make_events(5, severity=2),   # S = 50
-        }
-        r = assess(corr, min_events=5, window_max=10.0)
-        expected = 50 * 0.40 + 100 * 0.25 + 50 * 0.20 + 100 * 0.15
-        self.assertAlmostEqual(r.risk_score, round(expected, 2), places=2)
-
-    def test_low_severity_spread_is_medium(self):
-        # sev 3, มาแค่พอดี min, กระจาย 5 เป้า, window เต็ม
-        corr = {
-            "src_ip": "2.2.2.2",
-            "event_count": 5,
-            "window_seconds": 9.9,
-            "events": [{"severity": 3, "dest_ip": f"10.0.0.{i}"}
-                       for i in range(5)],
-        }
-        r = assess(corr, min_events=5, window_max=10.0)
-        # S=25, F=100, T~1, C=20 -> R = 10 + 25 + 0.2 + 3 = 38.2
-        self.assertAlmostEqual(r.risk_score, 38.2, places=1)
-        self.assertEqual(r.risk_level, "MEDIUM")   # 30–59 = MEDIUM
+SRC = "198.51.100.77"
 
 
-class TestRiskLevel(unittest.TestCase):
-    def test_thresholds(self):
-        self.assertEqual(risk_level(85), "CRITICAL")
-        self.assertEqual(risk_level(80), "CRITICAL")
-        self.assertEqual(risk_level(79), "HIGH")
-        self.assertEqual(risk_level(60), "HIGH")
-        self.assertEqual(risk_level(59), "MEDIUM")
-        self.assertEqual(risk_level(40), "MEDIUM")
-        self.assertEqual(risk_level(30), "MEDIUM")
-        self.assertEqual(risk_level(29), "LOW")
-        self.assertEqual(risk_level(0), "LOW")
+def make_pattern(count=5, severity=1, window=5.0, src=SRC):
+    events = tuple({"src_ip": src, "dest_ip": "192.0.2.10", "severity": severity}
+                   for _ in range(count))
+    return CorrelationPattern(
+        src_ip=src,
+        window_start=T0,
+        window_end=T0 + timedelta(seconds=window),
+        event_count=count,
+        max_severity=severity,
+        events=events,
+    )
+
+
+# ---------- S: Severity ----------
+class TestSeverityFactor:
+    @pytest.mark.parametrize("severity,expected", [
+        (1, 75.0),      # HIGH
+        (2, 50.0),      # MEDIUM
+        (3, 25.0),      # LOW
+        (0, 100.0),     # custom critical signature (reserved ของโปรเจกต์)
+    ])
+    def test_severity_map(self, severity, expected):
+        assert factor_severity(severity) == expected
+
+    def test_severity_map_matches_blueprint_table(self):
+        assert SEVERITY_SCORE == {0: 100.0, 1: 75.0, 2: 50.0, 3: 25.0}
+
+    def test_missing_severity_is_zero(self):
+        assert factor_severity(None) == 0.0
+
+    def test_unknown_severity_scores_low_not_high(self):
+        # severity นอกตาราง ต้องไม่กลายเป็นคะแนนสูงโดยบังเอิญ
+        assert factor_severity(9) == 25.0
+
+    def test_pattern_uses_most_severe(self):
+        # Suricata: เลขน้อย = รุนแรงกว่า -> max_severity ของ [3,2,1] คือ 1
+        events = ({"severity": 3}, {"severity": 2}, {"severity": 1})
+        p = CorrelationPattern.from_dict(
+            {"src_ip": SRC, "event_count": 3, "window_seconds": 2.0, "events": events})
+        assert p.max_severity == 1
+        assert factor_severity(p.max_severity) == 75.0
+
+
+# ---------- F: Frequency tiers ----------
+class TestFrequencyFactor:
+    @pytest.mark.parametrize("count,expected", [
+        (1, 20.0),
+        (2, 40.0), (3, 40.0),
+        (4, 70.0), (5, 70.0),
+        (6, 100.0), (30, 100.0),
+    ])
+    def test_frequency_tiers(self, count, expected):
+        assert factor_frequency(count) == expected
+
+    def test_zero_events(self):
+        assert factor_frequency(0) == 0.0
+
+
+# ---------- T: Temporal lookup (absolute) ----------
+class TestTemporalFactor:
+    @pytest.mark.parametrize("window,expected", [
+        (0.0, 100.0), (5.0, 100.0), (10.0, 100.0),      # ≤10s
+        (10.1, 75.0), (30.0, 75.0),                     # ≤30s
+        (30.1, 50.0), (60.0, 50.0),                     # ≤60s
+        (60.1, 25.0), (600.0, 25.0),                    # >60s
+    ])
+    def test_temporal_lookup(self, window, expected):
+        assert factor_temporal(window) == expected
+
+    def test_temporal_is_absolute_not_window_ratio(self):
+        # pattern กินเวลา 25s: ตารางให้ 75 เสมอ ไม่ว่า correlation window จะตั้งไว้เท่าไร
+        # (สูตรเดิมคือ (1 − 25/30)×100 ≈ 16.7 ซึ่งไม่ใช่ของ Blueprint)
+        assert factor_temporal(25.0) == 75.0
+
+
+# ---------- C: Source context ----------
+class TestContextFactor:
+    def test_unknown_source_is_80(self):
+        assert factor_context(UNKNOWN) == 80.0
+
+    def test_known_lab_asset_is_30(self):
+        assert factor_context(KNOWN) == 30.0
+
+    def test_allowlisted_is_zero(self):
+        assert factor_context(ALLOWED) == 0.0
+
+    def test_allowlist_wins_over_known_asset(self):
+        both = SourceContext(allowlisted=True, known_asset=True)
+        assert factor_context(both) == 0.0
+
+    def test_no_context_defaults_to_unknown(self):
+        # ไม่มีข้อมูล = ไม่ลดความเสี่ยงให้ใคร
+        assert factor_context(None) == 80.0
+
+
+# ---------- Weight sets ----------
+class TestWeightSets:
+    @pytest.mark.parametrize("name,weights", [
+        ("A", {"severity": 0.40, "frequency": 0.25, "temporal": 0.20, "context": 0.15}),
+        ("B", {"severity": 0.30, "frequency": 0.30, "temporal": 0.25, "context": 0.15}),
+        ("C", {"severity": 0.50, "frequency": 0.20, "temporal": 0.15, "context": 0.15}),
+    ])
+    def test_weight_sets_match_blueprint(self, name, weights):
+        assert WEIGHT_SETS[name] == weights
+
+    @pytest.mark.parametrize("name", ["A", "B", "C"])
+    def test_weights_sum_to_one(self, name):
+        assert sum(WEIGHT_SETS[name].values()) == pytest.approx(1.0)
+
+    def test_invalid_weight_set_raises(self):
+        with pytest.raises(ValueError):
+            calculate(make_pattern(), UNKNOWN, weight_set="D")
+
+
+# ---------- GOLDEN CASE: Blueprint §5 Step 5.1 ----------
+class TestGoldenCase:
+    def test_blueprint_golden_79_5(self):
+        """5 HIGH events ภายใน 10s จาก source ที่ไม่รู้จัก ด้วย Set A
+        75(0.40) + 70(0.25) + 100(0.20) + 80(0.15) = 30 + 17.5 + 20 + 12 = 79.5"""
+        result = calculate(make_pattern(count=5, severity=1, window=5.0),
+                           UNKNOWN, weight_set="A")
+        assert result.severity_score == 75.0
+        assert result.frequency_score == 70.0
+        assert result.temporal_score == 100.0
+        assert result.context_score == 80.0
+        assert result.risk_score == 79.5
+        assert result.risk_level == "HIGH"
+        assert result.weight_set == "A"
+        assert result.src_ip == SRC
+
+    def test_allowlisted_pattern_keeps_risk_score(self):
+        """Risk ≠ Decision: allowlisted source ได้ C=0 แต่ score ไม่เป็น 0
+        30 + 17.5 + 20 + 0 = 67.5 -> HIGH (การยกเว้น block เป็นงานของ RULE-003)"""
+        result = calculate(make_pattern(count=5, severity=1, window=5.0),
+                           ALLOWED, weight_set="A")
+        assert result.context_score == 0.0
+        assert result.risk_score == 67.5
+        assert result.risk_level == "HIGH"
+        assert result.risk_score > 0
+
+    def test_known_asset_lowers_score(self):
+        # 30 + 17.5 + 20 + 4.5 = 72.0
+        result = calculate(make_pattern(count=5, severity=1, window=5.0),
+                           KNOWN, weight_set="A")
+        assert result.context_score == 30.0
+        assert result.risk_score == 72.0
+
+
+# ---------- RiskResult contract (ตรงกับตาราง risk_assessments §3.4) ----------
+class TestRiskResultContract:
+    def test_has_db_field_names(self):
+        r = calculate(make_pattern(), UNKNOWN)
+        for name in ("severity_score", "frequency_score", "temporal_score",
+                     "context_score", "weight_set", "risk_score", "risk_level"):
+            assert hasattr(r, name), name
+
+    def test_risk_model_does_not_decide(self):
+        # Risk Engine ห้ามตัดสิน BLOCK/ALERT — ไม่มี field พวกนี้
+        r = calculate(make_pattern(), UNKNOWN)
+        for name in ("action", "decision", "rule_id", "block_duration"):
+            assert not hasattr(r, name), name
+
+    def test_factors_shorthand(self):
+        r = calculate(make_pattern(), UNKNOWN)
+        assert r.factors == {"S": 75.0, "F": 70.0, "T": 100.0, "C": 80.0}
+
+    def test_default_weight_set_is_a(self):
+        assert calculate(make_pattern(), UNKNOWN).weight_set == "A"
+
+
+# ---------- legacy dict bridge (ชั่วคราวจนถึง STEP 5) ----------
+class TestLegacyDictPattern:
+    def test_accepts_dict_pattern(self):
+        r = calculate({"src_ip": SRC, "event_count": 5, "window_seconds": 5.0,
+                       "events": ({"severity": 1},)}, UNKNOWN)
+        assert r.risk_score == 79.5
+
+    def test_dict_window_seconds_preserved(self):
+        p = CorrelationPattern.from_dict(
+            {"src_ip": SRC, "event_count": 5, "window_seconds": 42.0, "events": ()})
+        assert p.window_seconds == 42.0
+        assert factor_temporal(p.window_seconds) == 50.0
+
+
+# ---------- Risk level thresholds ----------
+class TestRiskLevel:
+    @pytest.mark.parametrize("score,level", [
+        (100, "CRITICAL"), (85, "CRITICAL"), (80, "CRITICAL"),
+        (79.5, "HIGH"), (60, "HIGH"),
+        (59.9, "MEDIUM"), (30, "MEDIUM"),
+        (29.9, "LOW"), (0, "LOW"),
+    ])
+    def test_thresholds(self, score, level):
+        assert risk_level(score) == level
+
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    import sys
+    sys.exit(pytest.main([__file__, "-v"]))

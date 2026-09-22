@@ -24,11 +24,28 @@ firewall state ที่ต้องตามแก้ (ดู alignment plan ST
 """
 import time
 import threading
+from datetime import datetime, timezone
 
 from security_engine.models import CorrelationPattern
 from security_engine.policy.source_context import UnknownSourceContextResolver
 from security_engine.scoring.risk import calculate, DEFAULT_WEIGHT_SET
 from security_engine.policy.rule_engine import BLOCK, ALERT, NO_AUTO_BLOCK
+
+
+def _utc_iso(value=None):
+    """wall-clock UTC ISO8601 (NFR-04) สำหรับ experiment_timestamps
+
+    แยกคนละหน้าที่กับ time.monotonic():
+        monotonic  -> วัดช่วงเวลา (ไม่กระโดดเมื่อ NTP ปรับนาฬิกา) = latency ที่เชื่อถือได้
+        wall clock -> จุดเวลาที่บันทึกเป็นหลักฐานและ join กับ EVE/pfSense log ได้
+    ทั้งคู่ถูกเก็บใน trace เดียวกัน ไม่ใช่ตัวใดตัวหนึ่งแทนอีกตัว
+    """
+    if value is None:
+        value = datetime.now(timezone.utc)
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    return str(value)
 
 
 class SecurityPipeline:
@@ -64,6 +81,15 @@ class SecurityPipeline:
             "event_time": event.get("timestamp"),      # Suricata clock — ห้ามใช้วัด latency
             "received_at": event.get("received_at"),    # SEC01 clock
             "t0_received": time.monotonic(),
+            # --- wall-clock UTC ตามชื่อของ §3.4 experiment_timestamps (FR-15) ---
+            # t_event มาจากนาฬิกาของ Suricata (pfSense) ส่วนที่เหลือเป็นนาฬิกาของ SEC01
+            # -> M1 ข้าม clock domain ต้องมี NTP sync (Blueprint M1 ระบุ clock skew ไว้เอง)
+            "t_event": _utc_iso(event.get("timestamp")) if event.get("timestamp")
+                       else None,
+            "t_detection": _utc_iso(event.get("received_at")),
+            "t_decision": None,
+            "t_block_cmd": None,
+            "t_block_verified": None,
             "t1_correlated": None,
             "t2_risk": None,
             "t3_decision": None,
@@ -98,6 +124,7 @@ class SecurityPipeline:
         # --- Rule ---
         decision = self.rule_engine.decide(risk, pattern)
         trace["t3_decision"] = time.monotonic()
+        trace["t_decision"] = _utc_iso()
         trace["decision"] = decision.action
 
         # --- Audit chain (ก่อน enforcement เสมอ) ---
@@ -117,9 +144,12 @@ class SecurityPipeline:
         if decision.action == BLOCK:
             with self.lock:                             # กัน race กับ expire_due()
                 trace["t4_enforce_req"] = time.monotonic()
+                trace["t_block_cmd"] = _utc_iso()
                 result = self.lifecycle.block(decision)
                 if result.success:
                     trace["t5_enforce_ok"] = time.monotonic()
+                    # verified แล้วเท่านั้น — ล้มเหลว/ถูกระงับ ต้องคง None ไว้
+                    trace["t_block_verified"] = _utc_iso()
                 trace["duplicate_block"] = getattr(result, "duplicate", False)
                 trace["block_suppressed"] = getattr(result, "suppressed", False)
 

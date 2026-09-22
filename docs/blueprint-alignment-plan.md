@@ -219,7 +219,7 @@ implementation ก่อน alignment ใช้ชื่อ `UNBLOCKED` สำ�
 
 | | |
 |---|---|
-| ไฟล์ใหม่ | `scripts/generate_test_events.py`, `experiments/results_template.csv` (23 columns ตาม §14.5), `docs/test_plan.md` (T1–T11 + Expected Result) |
+| ไฟล์ใหม่ | `scripts/generate_test_events.py`, `experiments/results_template.csv` (**37 columns** ตาม §14.5 — เลข 23 ในแผนฉบับแรกเป็นความผิดพลาดของเอกสารนี้เอง ไม่ใช่ค่าใน Blueprint), `docs/test_plan.md` (T1–T11 + Expected Result) |
 | ไฟล์แก้ | `run_experiment.py` → เขียน `experiment_timestamps` (`test_id` = T1..T11), retire A1–A4 เป็น internal label พร้อมตาราง mapping |
 | ปิด | **FR-15** เตรียม Phase 14 |
 

@@ -2,7 +2,7 @@
 tests/test_run_experiment.py — Phase 12 Synthetic Runner (logic mode + retry, offline)
 
 พิสูจน์:
-  1. scenario A1–A4 นิยามถูก (event count + expected decision ตรง spec)
+  1. scenario T10/T3/T4/T5 นิยามถูก (event count + expected decision ตรง spec)
   2. รัน logic mode จริง (FakeEnforcer) -> decision ตรง expected + trial_status=SUCCESS
   3. ทุก trace ถูก tag input_mode="synthetic" (กันปนกับ real Suricata)
   4. retry behavior (EnforcementError): SUCCESS retry=0 / SUCCESS หลัง retry / FAILED
@@ -11,6 +11,7 @@ tests/test_run_experiment.py — Phase 12 Synthetic Runner (logic mode + retry, 
 ไม่แตะ pfSense / SSH — enforcer ที่โยน error เป็นตัวปลอมใน test
 """
 import json
+from pathlib import Path
 
 import pytest
 
@@ -25,33 +26,46 @@ def _no_retry_delay(monkeypatch):
 
 
 # ---- 1. scenario definitions ----
-def test_scenarios_are_four():
-    assert rx.SCENARIOS == ["A1", "A2", "A3", "A4"]
+def test_scenarios_use_canonical_test_ids():
+    """ป้าย A1–A4 ปลดระวางแล้ว (STEP 10) — canonical ID คือ T-number"""
+    assert rx.SCENARIOS == ["T10", "T3", "T4", "T5"]
+    assert not [s for s in rx.SCENARIOS if s.startswith("A")]
 
 
-def test_a1_below_min_events_none():
-    events, expected = rx.scenario_events("A1")
+def test_legacy_labels_still_map_to_test_ids():
+    """trace เก่าใช้ A1–A4 — ต้องแปลได้ แต่ไม่ใช่ชื่อหลักอีกต่อไป"""
+    assert rx.LEGACY_LABELS == {"A1": "T10", "A2": "T3", "A3": "T4", "A4": "T5"}
+    for legacy, canonical in rx.LEGACY_LABELS.items():
+        old_events, old_expected = rx.scenario_events(legacy)
+        new_events, new_expected = rx.scenario_events(canonical)
+        # timestamp เป็น now() จึงเทียบรูปร่างของ scenario ไม่ใช่ตัวเวลา
+        assert old_expected == new_expected
+        assert [(e["src_ip"], e["dest_ip"], e["severity"]) for e in old_events] ==                [(e["src_ip"], e["dest_ip"], e["severity"]) for e in new_events]
+
+
+def test_t10_below_min_events_none():
+    events, expected = rx.scenario_events("T10")
     assert len(events) == 4
     assert expected is None
 
 
-def test_a2_medium_alert():
-    events, expected = rx.scenario_events("A2")
+def test_t3_medium_alert():
+    events, expected = rx.scenario_events("T3")
     assert len(events) == 5 and expected == "ALERT"
     assert {e["dest_ip"] for e in events} == {"a", "b", "c", "d", "e"}
     # RULE-002 ใช้ raw severity: MEDIUM = Suricata severity 2 (ไม่ใช่ risk_level)
     assert all(e["severity"] == 2 for e in events)
 
 
-def test_a3_critical_block():
-    events, expected = rx.scenario_events("A3")
+def test_t4_critical_block():
+    events, expected = rx.scenario_events("T4")
     assert len(events) == 5 and expected == "BLOCK"
     assert {e["dest_ip"] for e in events} == {"x"}
     assert all(e["severity"] == 1 for e in events)
 
 
-def test_a4_allowlisted_no_auto_block():
-    events, expected = rx.scenario_events("A4")
+def test_t5_allowlisted_no_auto_block():
+    events, expected = rx.scenario_events("T5")
     assert expected == "NO_AUTO_BLOCK"
     assert all(e["src_ip"] == rx.ALLOWLISTED_SRC for e in events)
 
@@ -146,7 +160,7 @@ def _patch_build(monkeypatch, enforcer):
 
 def test_a3_success_first_try(tmp_path, monkeypatch):
     _patch_build(monkeypatch, FlakyEnforcer(fail_times=0))
-    trace, expected = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "A3", retries=2)
+    trace, expected = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "T4", retries=2)
     assert trace["trial_status"] == "SUCCESS"
     assert trace["retry_count"] == 0
     assert trace["decision"] == "BLOCK"
@@ -157,7 +171,7 @@ def test_a3_success_first_try(tmp_path, monkeypatch):
 def test_a3_recovers_after_one_retry(tmp_path, monkeypatch):
     # ล้ม 1 ครั้งแรก แล้วสำเร็จ -> SUCCESS retry_count=1
     _patch_build(monkeypatch, FlakyEnforcer(fail_times=1))
-    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "A3", retries=2)
+    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "T4", retries=2)
     assert trace["trial_status"] == "SUCCESS"
     assert trace["retry_count"] == 1
     assert trace["enforcement_ok"] is True
@@ -167,7 +181,7 @@ def test_a3_recovers_after_one_retry(tmp_path, monkeypatch):
 def test_a3_fails_after_retries_exhausted(tmp_path, monkeypatch):
     # ล้มตลอด (มากกว่า retries+1) -> FAILED
     _patch_build(monkeypatch, FlakyEnforcer(fail_times=99))
-    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "A3", retries=2)
+    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "T4", retries=2)
     assert trace["trial_status"] == "FAILED"
     assert trace["retry_count"] == 2
     assert trace["enforcement_ok"] is False
@@ -177,19 +191,111 @@ def test_a3_fails_after_retries_exhausted(tmp_path, monkeypatch):
 def test_failed_trace_has_no_latency(tmp_path, monkeypatch):
     # กฎเหล็ก: FAILED trial ห้ามมี latency fields -> analyzer exclude เอง ไม่ปนสถิติ
     _patch_build(monkeypatch, FlakyEnforcer(fail_times=99))
-    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "A3", retries=2)
+    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "T4", retries=2)
     for k in ("t0_received", "t5_enforce_ok", "detection_s", "enforcement_s", "end_to_end_s"):
         assert k not in trace, f"FAILED trace ต้องไม่มี {k}"
 
 
+def test_failed_trace_does_not_claim_a_decision(tmp_path, monkeypatch):
+    """FAILED = pipeline ไม่เคย emit trace -> ห้ามมี decision ที่ engine ไม่ได้ตัดสิน
+
+    ความคาดหมายไปอยู่ช่อง expected_decision แยกต่างหาก เพื่อไม่ให้ถูกกรอกลง
+    ช่อง decision ของ results CSV แทนผลจริง
+    """
+    _patch_build(monkeypatch, FlakyEnforcer(fail_times=99))
+    trace, expected = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"),
+                                   "T4", retries=2)
+    assert trace["trial_status"] == "FAILED"
+    assert trace["decision"] is None
+    assert trace["expected_decision"] == expected == "BLOCK"
+
+
 def test_non_block_scenario_never_retries(tmp_path, monkeypatch):
-    # A2 (ALERT) ไม่เข้า enforcement -> enforcer ไม่ถูกเรียก -> ไม่ retry แม้ enforcer จะ flaky
+    # T3 (ALERT) ไม่เข้า enforcement -> enforcer ไม่ถูกเรียก -> ไม่ retry แม้ enforcer จะ flaky
     fe = FlakyEnforcer(fail_times=99)
     _patch_build(monkeypatch, fe)
-    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "A2", retries=2)
+    trace, _ = rx.run_trial("enforcement", "h", str(tmp_path / "x.db"), "T3", retries=2)
     assert trace["trial_status"] == "SUCCESS"
     assert trace["decision"] == "ALERT"
     assert fe.calls == 0                # add_block ไม่เคยถูกเรียก
+
+
+# ---- 6. FR-15: experiment_timestamps ต่อ trial (STEP 10) ----
+def test_record_timestamps_writes_real_pipeline_times(tmp_path):
+    from security_engine.storage.repository import AuditRepository
+
+    repo = AuditRepository(str(tmp_path / "ts.db"))
+    trace = {"t_event": "2026-01-01T12:00:00+00:00",
+             "t_detection": "2026-01-01T12:00:00.100000+00:00",
+             "t_decision": "2026-01-01T12:00:00.200000+00:00",
+             "t_block_cmd": "2026-01-01T12:00:00.250000+00:00",
+             "t_block_verified": "2026-01-01T12:00:00.900000+00:00",
+             "input_mode": "synthetic", "trial_status": "SUCCESS"}
+    rx.record_timestamps(repo, "T4", 3, trace)
+
+    row = repo.get_experiment_timestamps("T4")[0]
+    assert row["t_event"] == trace["t_event"]
+    assert row["t_block_verified"] == trace["t_block_verified"]
+    assert "run=3" in row["notes"], "run_id อยู่ใน notes (schema ไม่มีคอลัมน์ repetition)"
+
+
+def test_record_timestamps_keeps_missing_points_null(tmp_path):
+    from security_engine.storage.repository import AuditRepository
+
+    repo = AuditRepository(str(tmp_path / "ts.db"))
+    rx.record_timestamps(repo, "T3", 1, {"t_event": "2026-01-01T12:00:00+00:00",
+                                         "t_decision": "2026-01-01T12:00:00.2+00:00"})
+    row = repo.get_experiment_timestamps("T3")[0]
+    assert row["t_block_cmd"] is None and row["t_block_verified"] is None
+
+
+def test_record_timestamps_survives_db_failure(tmp_path, capsys):
+    """audit ล้ม != trial ล้ม (NFR-06)"""
+    from security_engine.storage.repository import AuditPersistenceError
+
+    class BrokenRepo:
+        def save_experiment_timestamps(self, *a, **k):
+            raise AuditPersistenceError("disk full")
+
+    assert rx.record_timestamps(BrokenRepo(), "T4", 1, {"t_event": "x"}) is None
+    assert "experiment_timestamps" in capsys.readouterr().out
+
+
+def test_record_timestamps_without_repository_is_noop():
+    assert rx.record_timestamps(None, "T4", 1, {"t_event": "x"}) is None
+
+
+def test_run_persists_one_row_per_trial(tmp_path, monkeypatch):
+    from security_engine.storage.repository import AuditRepository
+
+    _patch_build(monkeypatch, FlakyEnforcer(fail_times=0))   # สำเร็จทุกครั้ง
+    repo = AuditRepository(str(tmp_path / "run.db"))
+    rx.run("logic", str(tmp_path / "t.jsonl"), 2, None, str(tmp_path / "run.db"),
+           block_duration=10, retries=0, test_ids=["T4"], repository=repo)
+
+    rows = repo.get_experiment_timestamps("T4")
+    assert len(rows) == 2
+    assert [r["notes"].split(";")[0] for r in rows] == ["run=1", "run=2"]
+    assert all(r["t_decision"] for r in rows), "ต้องเป็นเวลาที่ pipeline บันทึกจริง"
+
+
+# ---- 7. NFR-07: ไม่มีค่า lab ฝังในโค้ด ----
+def test_no_lab_host_hardcoded_in_runner():
+    source = Path(rx.__file__).read_text(encoding="utf-8")
+    assert "192.168." not in source
+    assert "admin@" not in source
+
+
+def test_enforcement_mode_requires_host_from_env(monkeypatch, tmp_path):
+    from security_engine.settings import ConfigError
+
+    monkeypatch.delenv(rx.ENV_PFSENSE_HOST, raising=False)
+    monkeypatch.setattr("sys.argv", ["run_experiment.py", "--mode", "enforcement",
+                                     "--out", str(tmp_path / "x.jsonl")])
+    monkeypatch.setattr(rx, "run", lambda *a, **k: pytest.fail(
+        "ต้องพังก่อนเริ่มรัน เมื่อไม่มี ITIS_PFSENSE_HOST"))
+    with pytest.raises(ConfigError):
+        rx.main()
 
 
 if __name__ == "__main__":

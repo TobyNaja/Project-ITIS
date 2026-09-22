@@ -61,6 +61,15 @@ def _iso(value) -> str:
     return str(value)
 
 
+def _iso_or_none(value):
+    """ต่างจาก _iso(): None ต้องคงเป็น NULL ไม่ใช่ "เวลาตอนนี้"
+
+    จุดเวลาที่ยังไม่เกิด (t_block_verified ของ scenario ที่ไม่ block) ถ้าเติม now()
+    ให้ จะกลายเป็นหลักฐานปลอมและทำให้ latency ผิดทั้งชุด
+    """
+    return None if value is None else _iso(value)
+
+
 def _json_safe(value):
     """datetime ฯลฯ -> string สำหรับ raw_json (ไม่ทำให้ payload พังเพราะ type)"""
     return json.dumps(value, default=str, ensure_ascii=False, sort_keys=True)
@@ -242,7 +251,37 @@ class AuditRepository:
         return self._read("SELECT * FROM recovery_events WHERE service = ? ORDER BY id",
                           (service,), what="get_recovery_events")
 
-    # ---------- 7. active_blocks link ----------
+    # ---------- 7. experiment_timestamps (FR-15 / M1-M4) ----------
+    def save_experiment_timestamps(self, test_id, *, t_event=None, t_detection=None,
+                                   t_decision=None, t_block_cmd=None,
+                                   t_block_verified=None, notes=None) -> int:
+        """บันทึกจุดเวลาของ 1 repetition (§3.4 experiment_timestamps)
+
+        ทุกค่าเป็น ISO8601 UTC (NFR-04) — ค่าที่ยังไม่เกิด (เช่น t_block_* ของ
+        scenario ที่ไม่ได้ block) เก็บเป็น NULL ไม่ใช่ 0 หรือเวลาปลอม
+
+        *** ห้ามส่งเวลาที่ script สร้างขึ้นหลังจบการทดลอง *** — ต้องเป็นเวลาที่
+        pipeline บันทึกไว้ตอนเหตุการณ์เกิดจริง ไม่งั้น M1-M4 จะวัดเวลาของ script
+        """
+        return self._write(
+            "INSERT INTO experiment_timestamps "
+            "(test_id, t_event, t_detection, t_decision, t_block_cmd, "
+            " t_block_verified, notes) VALUES (?,?,?,?,?,?,?)",
+            (test_id,
+             _iso_or_none(t_event), _iso_or_none(t_detection),
+             _iso_or_none(t_decision), _iso_or_none(t_block_cmd),
+             _iso_or_none(t_block_verified), notes),
+            what="save_experiment_timestamps")
+
+    def get_experiment_timestamps(self, test_id=None):
+        if test_id is None:
+            return self._read("SELECT * FROM experiment_timestamps ORDER BY id",
+                              what="get_experiment_timestamps")
+        return self._read(
+            "SELECT * FROM experiment_timestamps WHERE test_id = ? ORDER BY id",
+            (test_id,), what="get_experiment_timestamps")
+
+    # ---------- 8. active_blocks link ----------
     def link_active_block_action(self, src_ip, action_id) -> None:
         """ผูก active_blocks ที่ lifecycle สร้างไว้เข้ากับ actions.id
 

@@ -117,7 +117,7 @@ def test_custom_duration_from_decision(setup):
     assert blk["expires_at"] == (T0 + timedelta(seconds=60)).isoformat()
 
 
-# ---- 5. expire -> remove -> UNBLOCKED ----
+# ---- 5. expire -> remove -> EXPIRED ----
 def test_expire_due_removes_expired(setup):
     store, clock = setup
     enf = FakeEnforcer(remove_ok=True)
@@ -128,7 +128,7 @@ def test_expire_due_removes_expired(setup):
     mgr.expire_due()
 
     assert enf.removed == [IP]
-    assert store.get_block(IP)["status"] == "UNBLOCKED"
+    assert store.get_block(IP)["status"] == "EXPIRED"
 
 
 # ---- 6. unexpired -> ไม่ remove ----
@@ -145,7 +145,7 @@ def test_unexpired_not_removed(setup):
     assert store.get_block(IP)["status"] == "ACTIVE"
 
 
-# ---- 7. remove success -> UNBLOCKED ----
+# ---- 7. remove success -> EXPIRED ----
 def test_remove_success_unblocked(setup):
     store, clock = setup
     enf = FakeEnforcer(remove_ok=True)
@@ -155,7 +155,7 @@ def test_remove_success_unblocked(setup):
 
     mgr.expire_due()
 
-    assert store.get_block(IP)["status"] == "UNBLOCKED"
+    assert store.get_block(IP)["status"] == "EXPIRED"
 
 
 # ---- 8. remove fail -> REMOVE_FAILED ----
@@ -171,7 +171,7 @@ def test_remove_fail_marks_remove_failed(setup):
     assert store.get_block(IP)["status"] == "REMOVE_FAILED"
 
 
-# ---- 9. retry success -> UNBLOCKED ----
+# ---- 9. retry success -> EXPIRED ----
 def test_retry_success_unblocks(setup):
     store, clock = setup
     enf = FakeEnforcer(remove_ok=False)
@@ -184,7 +184,7 @@ def test_retry_success_unblocks(setup):
     enf.remove_ok = True                   # pfSense กลับมาปกติ
     mgr.expire_due()                       # retry
 
-    assert store.get_block(IP)["status"] == "UNBLOCKED"
+    assert store.get_block(IP)["status"] == "EXPIRED"
 
 
 # ---- 10. retry fail -> ยังคง REMOVE_FAILED ----
@@ -221,7 +221,7 @@ def test_reconcile_after_restart_removes_expired(tmp_path):
     mgr2.reconcile()
 
     assert enf2.removed == [IP]            # Manager ใหม่ปลด block ที่ค้าง
-    assert store2.get_block(IP)["status"] == "UNBLOCKED"
+    assert store2.get_block(IP)["status"] == "EXPIRED"
 
 
 # ---- 12. non-BLOCK -> ValueError, ไม่แตะ enforcer ----

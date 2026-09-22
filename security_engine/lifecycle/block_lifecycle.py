@@ -15,7 +15,7 @@ Responsibility ที่แยกชัด:
 - block_duration มาจาก decision เท่านั้น ไม่ hard-code 300
 - เขียน SQLite เป็น ACTIVE ก็ต่อเมื่อ enforcer.add_block() verified สำเร็จ
   (DB ต้องไม่บอกว่า active ทั้งที่ pfSense ไม่ได้ block จริง)
-- ตอน remove: verified=True → UNBLOCKED, verified=False → REMOVE_FAILED (retry ได้)
+- ตอน remove: verified=True → EXPIRED, verified=False → REMOVE_FAILED (retry ได้)
 - Manager ไม่มี infinite loop เอง — Lifecycle Runner (ภายหลัง) เป็นคนเรียก expire_due เป็นระยะ
 """
 from datetime import datetime, timedelta, timezone
@@ -68,7 +68,7 @@ class BlockLifecycleManager:
         """เรียก enforcer.remove_block แล้วอัปเดต store ตามผล verify"""
         result = self.enforcer.remove_block(ip)
         if result.success:
-            self.store.remove_block(ip)            # -> UNBLOCKED
+            self.store.remove_block(ip)            # -> EXPIRED
         else:
             self.store.mark_remove_failed(ip)      # -> REMOVE_FAILED (retry รอบหน้า)
         return result

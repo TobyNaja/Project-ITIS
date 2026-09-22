@@ -6,21 +6,26 @@ Phase 9 — Persistent Block State
 รับผิดชอบเฉพาะการเก็บสถานะ temporary block ลง SQLite
 ไม่มีหน้าที่สั่ง pfSense และไม่มี timer
 
-State ที่เก็บ:
-- src_ip
-- blocked_at
-- expires_at
-- status
-- rule_id
-- reason
+State ที่เก็บ (schema กลางอยู่ที่ security_engine/storage/schema.py §3.4):
+- src_ip, blocked_at, expires_at, status, action_id
+- rule_id / reason  ** ชั่วคราว ** — Blueprint เก็บสองค่านี้ในตาราง decisions
+  จะย้ายตอน STEP 5 (audit trail wiring) ดู docs/blueprint-alignment-plan.md
+
+status ที่ใช้:
+    ACTIVE / EXPIRED / MANUALLY_REMOVED   ตาม Blueprint §3.4
+    REMOVE_FAILED                          operational failure state ตาม NFR-06 (D1)
 
 Timestamp เก็บเป็น ISO 8601 (อ่านง่ายใน DB/report) แต่ต้องมี timezone เสมอ
 และเวลาเทียบหมดอายุ จะ normalize เป็น UTC แล้ว compare ด้วย datetime จริง
 ไม่ใช้ string comparison (กัน bug เงียบเมื่อ offset ต่างกัน)
 """
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+
+from security_engine.storage.schema import (
+    connect, init_db, BLOCK_STATUSES,
+    STATUS_ACTIVE, STATUS_EXPIRED, STATUS_REMOVE_FAILED,
+)
 
 DEFAULT_DB_PATH = Path("data/security_engine.db")
 
@@ -45,27 +50,10 @@ class BlockStore:
 
     def __init__(self, db_path=DEFAULT_DB_PATH):
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+        init_db(self.db_path)          # schema กลางทั้ง 8 ตาราง + WAL + FK
 
     def _connect(self):
-        return sqlite3.connect(self.db_path)
-
-    def _init_db(self):
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS active_blocks (
-                    src_ip TEXT PRIMARY KEY,
-                    blocked_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    rule_id TEXT,
-                    reason TEXT
-                )
-                """
-            )
-            conn.commit()
+        return connect(self.db_path)
 
     def add_block(self, src_ip, blocked_at, expires_at, rule_id=None, reason=None):
         with self._connect() as conn:
@@ -75,20 +63,23 @@ class BlockStore:
                 (src_ip, blocked_at, expires_at, status, rule_id, reason)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (src_ip, blocked_at, expires_at, "ACTIVE", rule_id, reason),
+                (src_ip, blocked_at, expires_at, STATUS_ACTIVE, rule_id, reason),
             )
             conn.commit()
 
     def remove_block(self, src_ip):
-        """ทำเครื่องหมายว่า unblock สำเร็จ (verify ผ่าน) -> status UNBLOCKED"""
-        self.set_status(src_ip, "UNBLOCKED")
+        """unblock สำเร็จ (verify ผ่าน) -> EXPIRED ตาม Blueprint §3.4 / T6"""
+        self.set_status(src_ip, STATUS_EXPIRED)
 
     def mark_remove_failed(self, src_ip):
         """unblock ล้มเหลว (verify ไม่ผ่าน / SSH error) -> REMOVE_FAILED
         ยังไม่ถือว่าปลด block เพราะ pfSense อาจยัง block อยู่จริง"""
-        self.set_status(src_ip, "REMOVE_FAILED")
+        self.set_status(src_ip, STATUS_REMOVE_FAILED)
 
     def set_status(self, src_ip, status):
+        if status not in BLOCK_STATUSES:
+            raise ValueError(
+                f"status ต้องเป็นหนึ่งใน {BLOCK_STATUSES} ได้ {status!r}")
         with self._connect() as conn:
             conn.execute(
                 "UPDATE active_blocks SET status = ? WHERE src_ip = ?",
@@ -100,20 +91,20 @@ class BlockStore:
         """ดึง block ตาม status ที่ระบุ (ใช้หา REMOVE_FAILED มา retry)"""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, rule_id, reason "
+                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
                 "FROM active_blocks WHERE status = ? ORDER BY expires_at",
                 (status,),
             ).fetchall()
         return [
             {"src_ip": r[0], "blocked_at": r[1], "expires_at": r[2],
-             "status": r[3], "rule_id": r[4], "reason": r[5]}
+             "status": r[3], "action_id": r[4], "rule_id": r[5], "reason": r[6]}
             for r in rows
         ]
 
     def get_block(self, src_ip):
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, rule_id, reason "
+                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
                 "FROM active_blocks WHERE src_ip = ?",
                 (src_ip,),
             ).fetchone()
@@ -121,18 +112,19 @@ class BlockStore:
             return None
         return {
             "src_ip": row[0], "blocked_at": row[1], "expires_at": row[2],
-            "status": row[3], "rule_id": row[4], "reason": row[5],
+            "status": row[3], "action_id": row[4], "rule_id": row[5], "reason": row[6],
         }
 
     def get_active_blocks(self):
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, rule_id, reason "
-                "FROM active_blocks WHERE status = 'ACTIVE' ORDER BY expires_at"
+                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
+                "FROM active_blocks WHERE status = ? ORDER BY expires_at",
+                (STATUS_ACTIVE,),
             ).fetchall()
         return [
             {"src_ip": r[0], "blocked_at": r[1], "expires_at": r[2],
-             "status": r[3], "rule_id": r[4], "reason": r[5]}
+             "status": r[3], "action_id": r[4], "rule_id": r[5], "reason": r[6]}
             for r in rows
         ]
 
@@ -145,8 +137,9 @@ class BlockStore:
         # (ไม่ให้ SQLite เทียบ string — กัน bug timezone offset)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, rule_id, reason "
-                "FROM active_blocks WHERE status = 'ACTIVE' ORDER BY expires_at"
+                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
+                "FROM active_blocks WHERE status = ? ORDER BY expires_at",
+                (STATUS_ACTIVE,),
             ).fetchall()
 
         expired = []
@@ -155,6 +148,7 @@ class BlockStore:
             if expires_at <= now:
                 expired.append({
                     "src_ip": row[0], "blocked_at": row[1], "expires_at": row[2],
-                    "status": row[3], "rule_id": row[4], "reason": row[5],
+                    "status": row[3], "action_id": row[4], "rule_id": row[5],
+                    "reason": row[6],
                 })
         return expired

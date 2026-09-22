@@ -138,8 +138,40 @@ established from actual lab asset discovery.*
 | ไฟล์ใหม่ | `security_engine/storage/schema.py` (DDL ครบ 8 ตารางตาม §3.4), `security_engine/storage/audit_store.py` |
 | ไฟล์แก้ | `security_engine/lifecycle/block_store.py` — `active_blocks` ปัจจุบันขาด `action_id` และ status ไม่ตรง blueprint |
 | test | `tests/test_schema.py` — 8 ตารางครบ, FK ถูก, `PRAGMA journal_mode` คืน `wal`, parameterized query only; `test_block_store.py` แก้ตาม status ใหม่ |
-| ต้องตัดสินก่อน | ข้อ B (`REMOVE_FAILED`) |
 | ปิด | **§3.4, NFR-05** เตรียม FR-04/07/13/14/15 |
+
+### Design deviation ที่บันทึกไว้ใน STEP 4 (ข้อ B ปิดแล้ว)
+
+**D1 — `REMOVE_FAILED` เป็น operational failure state ที่เพิ่มจาก Blueprint**
+
+Blueprint §3.4 ระบุ `active_blocks.status` ไว้ 3 ค่า (`ACTIVE` / `EXPIRED` /
+`MANUALLY_REMOVED`) แต่ NFR-06 (fail-safe direction) + FR-09 (auto-unblock ต้อง verify)
+ทำให้เกิดสถานะที่ blueprint ไม่ได้ครอบคลุม:
+
+```
+ACTIVE -> หมดอายุ -> สั่ง unblock -> verify ไม่ผ่าน -> ???
+```
+
+ถ้า map เป็น `EXPIRED` จะเท่ากับ **โกหกว่า block ถูกปลดแล้ว** ทั้งที่ pfSense อาจยัง
+block อยู่จริง และ reconcile/retry จะหาไม่เจอ → ขัด NFR-06 โดยตรง
+(*"ถ้า Unblock ล้มเหลว → ALERT ทันที เพราะค้าง block อันตรายกว่า"*)
+
+**กฎที่ล็อก:** `REMOVE_FAILED` เป็น state ของ **ความล้มเหลวในการปลด** ไม่ใช่สถานะปลายทาง
+· ห้ามตีความหรือ map เป็น `EXPIRED` · ต้องคงไว้จนกว่า retry/reconcile จะปลดสำเร็จจริง
+· ไม่ถูกนับเป็น `ACTIVE` (จะได้ไม่ re-block ซ้ำ) · รายงานต้องระบุว่าเป็นส่วนขยายจาก
+blueprint พร้อมเหตุผลนี้
+
+**D2 — rename `UNBLOCKED` → `EXPIRED`**
+
+implementation ก่อน alignment ใช้ชื่อ `UNBLOCKED` สำหรับ block ที่หมดอายุและปลดสำเร็จ
+ซึ่งตรงกับ `EXPIRED` ของ blueprint ทุกประการ แต่คนละชื่อ — และ **T6 ตรวจชื่อนี้ตรงตัว**
+(*"Expected: `active_blocks.status = EXPIRED`"*) จึง rename ให้ตรง spec ใน STEP 4
+ไม่ใช่เปลี่ยนความหมาย · `MANUALLY_REMOVED` ประกาศไว้ใน schema แล้วแต่ยังไม่มี use case
+ในโค้ด (blueprint ไม่ได้ระบุ flow ของ manual removal ไว้)
+
+**ขอบเขตที่ STEP 4 ไม่ทำ:** ไม่เขียนอะไรลง `decisions`/`actions` (เป็น STEP 5) ดังนั้น
+`active_blocks.action_id` มีอยู่ใน schema ตาม §3.4 แต่ยังเป็น `NULL` เสมอ และ
+`rule_id`/`reason` ยังอยู่ใน `active_blocks` ชั่วคราวจนกว่า STEP 5 จะย้ายเข้า `decisions`
 
 ## STEP 5 — Pipeline เขียน audit trail ลง DB
 

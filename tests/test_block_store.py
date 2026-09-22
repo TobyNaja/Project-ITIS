@@ -17,7 +17,7 @@ def test_remove_changes_status_to_unblocked(tmp_path):
     now = datetime.now(timezone.utc); expires = now + timedelta(seconds=300)
     store.add_block("192.168.2.10", now.isoformat(), expires.isoformat())
     store.remove_block("192.168.2.10")
-    assert store.get_block("192.168.2.10")["status"] == "UNBLOCKED"
+    assert store.get_block("192.168.2.10")["status"] == "EXPIRED"
 
 def test_get_active_blocks_returns_only_active(tmp_path):
     store = BlockStore(tmp_path / "test.db")
@@ -100,9 +100,9 @@ def test_get_blocks_by_status_finds_remove_failed(tmp_path):
 
 
 def test_retry_from_remove_failed_to_unblocked(tmp_path):
-    # REMOVE_FAILED -> retry สำเร็จ -> UNBLOCKED
+    # REMOVE_FAILED -> retry สำเร็จ -> EXPIRED
     store = BlockStore(tmp_path / "test.db")
     _add(store, "192.168.2.10")
     store.mark_remove_failed("192.168.2.10")
     store.remove_block("192.168.2.10")   # retry สำเร็จ
-    assert store.get_block("192.168.2.10")["status"] == "UNBLOCKED"
+    assert store.get_block("192.168.2.10")["status"] == "EXPIRED"

@@ -54,12 +54,12 @@ class BlockLifecycleManager:
         if result.success:
             now = self.clock()
             expires_at = now + timedelta(seconds=decision.block_duration)
+            # rule_id/reason ไม่เก็บซ้ำที่นี่ (STEP 5D) — canonical อยู่ที่ decisions
+            # ซึ่งย้อนถึงได้ผ่าน active_blocks.action_id -> actions.decision_id
             self.store.add_block(
                 src_ip=ip,
                 blocked_at=now.isoformat(),
                 expires_at=expires_at.isoformat(),
-                rule_id=getattr(decision, "rule_id", None),
-                reason=getattr(decision, "reason", None),
             )
         return result
 

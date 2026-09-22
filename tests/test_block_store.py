@@ -5,12 +5,14 @@ def test_add_and_get_active_block(tmp_path):
     store = BlockStore(tmp_path / "test.db")
     blocked_at = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
     expires_at = blocked_at + timedelta(seconds=300)
-    store.add_block("192.168.2.10", blocked_at.isoformat(), expires_at.isoformat(), "RULE-001", "HIGH risk pattern")
+    store.add_block("192.168.2.10", blocked_at.isoformat(), expires_at.isoformat())
     block = store.get_block("192.168.2.10")
     assert block is not None
     assert block["src_ip"] == "192.168.2.10"
     assert block["status"] == "ACTIVE"
-    assert block["rule_id"] == "RULE-001"
+    # rule_id/reason ไม่ได้เก็บที่นี่แล้ว (STEP 5D) — canonical อยู่ที่ decisions
+    assert "rule_id" not in block and "reason" not in block
+    assert block["action_id"] is None
 
 def test_remove_changes_status_to_unblocked(tmp_path):
     store = BlockStore(tmp_path / "test.db")

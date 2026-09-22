@@ -8,8 +8,9 @@ Phase 9 — Persistent Block State
 
 State ที่เก็บ (schema กลางอยู่ที่ security_engine/storage/schema.py §3.4):
 - src_ip, blocked_at, expires_at, status, action_id
-- rule_id / reason  ** ชั่วคราว ** — Blueprint เก็บสองค่านี้ในตาราง decisions
-  จะย้ายตอน STEP 5 (audit trail wiring) ดู docs/blueprint-alignment-plan.md
+
+rule_id / reason ไม่อยู่ที่นี่แล้ว (STEP 5D) — canonical คือ decisions.rule_id /
+decisions.reason ซึ่งย้อนถึงได้ด้วย active_blocks.action_id -> actions.decision_id
 
 status ที่ใช้:
     ACTIVE / EXPIRED / MANUALLY_REMOVED   ตาม Blueprint §3.4
@@ -55,15 +56,15 @@ class BlockStore:
     def _connect(self):
         return connect(self.db_path)
 
-    def add_block(self, src_ip, blocked_at, expires_at, rule_id=None, reason=None):
+    def add_block(self, src_ip, blocked_at, expires_at):
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO active_blocks
-                (src_ip, blocked_at, expires_at, status, rule_id, reason)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (src_ip, blocked_at, expires_at, status)
+                VALUES (?, ?, ?, ?)
                 """,
-                (src_ip, blocked_at, expires_at, STATUS_ACTIVE, rule_id, reason),
+                (src_ip, blocked_at, expires_at, STATUS_ACTIVE),
             )
             conn.commit()
 
@@ -91,20 +92,20 @@ class BlockStore:
         """ดึง block ตาม status ที่ระบุ (ใช้หา REMOVE_FAILED มา retry)"""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
+                "SELECT src_ip, blocked_at, expires_at, status, action_id "
                 "FROM active_blocks WHERE status = ? ORDER BY expires_at",
                 (status,),
             ).fetchall()
         return [
             {"src_ip": r[0], "blocked_at": r[1], "expires_at": r[2],
-             "status": r[3], "action_id": r[4], "rule_id": r[5], "reason": r[6]}
+             "status": r[3], "action_id": r[4]}
             for r in rows
         ]
 
     def get_block(self, src_ip):
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
+                "SELECT src_ip, blocked_at, expires_at, status, action_id "
                 "FROM active_blocks WHERE src_ip = ?",
                 (src_ip,),
             ).fetchone()
@@ -112,19 +113,19 @@ class BlockStore:
             return None
         return {
             "src_ip": row[0], "blocked_at": row[1], "expires_at": row[2],
-            "status": row[3], "action_id": row[4], "rule_id": row[5], "reason": row[6],
+            "status": row[3], "action_id": row[4],
         }
 
     def get_active_blocks(self):
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
+                "SELECT src_ip, blocked_at, expires_at, status, action_id "
                 "FROM active_blocks WHERE status = ? ORDER BY expires_at",
                 (STATUS_ACTIVE,),
             ).fetchall()
         return [
             {"src_ip": r[0], "blocked_at": r[1], "expires_at": r[2],
-             "status": r[3], "action_id": r[4], "rule_id": r[5], "reason": r[6]}
+             "status": r[3], "action_id": r[4]}
             for r in rows
         ]
 
@@ -137,7 +138,7 @@ class BlockStore:
         # (ไม่ให้ SQLite เทียบ string — กัน bug timezone offset)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT src_ip, blocked_at, expires_at, status, action_id, rule_id, reason "
+                "SELECT src_ip, blocked_at, expires_at, status, action_id "
                 "FROM active_blocks WHERE status = ? ORDER BY expires_at",
                 (STATUS_ACTIVE,),
             ).fetchall()
@@ -148,7 +149,6 @@ class BlockStore:
             if expires_at <= now:
                 expired.append({
                     "src_ip": row[0], "blocked_at": row[1], "expires_at": row[2],
-                    "status": row[3], "action_id": row[4], "rule_id": row[5],
-                    "reason": row[6],
+                    "status": row[3], "action_id": row[4],
                 })
         return expired

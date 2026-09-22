@@ -82,13 +82,12 @@ def test_table_columns(db, table, expected):
 
 
 def test_active_blocks_columns(db):
-    """§3.4 + field ชั่วคราว rule_id/reason (จะย้ายไป decisions ใน STEP 5)"""
+    """§3.4 เป๊ะ — ไม่มี rule_id/reason ซ้ำ (STEP 5D)"""
     with connect(db) as conn:
         cols = columns(conn, "active_blocks")
     assert cols == {
         "src_ip": "TEXT", "blocked_at": "TEXT", "expires_at": "TEXT",
         "action_id": "INTEGER", "status": "TEXT",
-        "rule_id": "TEXT", "reason": "TEXT",
     }
 
 
@@ -257,14 +256,28 @@ def test_legacy_other_statuses_untouched(legacy_db):
 
 
 def test_legacy_rows_and_fields_preserved(legacy_db):
+    """แถวและ field ที่ schema §3.4 ต้องการ ต้องอยู่ครบหลัง migrate"""
     init_db(legacy_db)
     with connect(legacy_db) as conn:
         row = conn.execute(
-            "SELECT src_ip, blocked_at, expires_at, rule_id, reason "
+            "SELECT src_ip, blocked_at, expires_at, status "
             "FROM active_blocks WHERE src_ip = ?", ("198.51.100.77",)).fetchone()
         count = conn.execute("SELECT COUNT(*) FROM active_blocks").fetchone()[0]
     assert count == 3                       # ไม่มีแถวหาย
-    assert row == ("198.51.100.77", T_BLOCK, T_EXPIRE, "RULE-001", "HIGH pattern")
+    assert row == ("198.51.100.77", T_BLOCK, T_EXPIRE, STATUS_ACTIVE)
+
+
+def test_legacy_duplicate_columns_are_dropped(legacy_db):
+    """STEP 5D: rule_id/reason ถูกถอดออกจาก DB เก่าด้วย ไม่ใช่แค่ DDL ใหม่
+
+    ค่าที่เคยอยู่ในสองคอลัมน์นี้หายไปจาก DB เก่าโดยตั้งใจ — canonical คือ
+    decisions.rule_id / decisions.reason ซึ่ง dataset ก่อน alignment ไม่มีอยู่แล้ว
+    """
+    init_db(legacy_db)
+    with connect(legacy_db) as conn:
+        cols = columns(conn, "active_blocks")
+    assert "rule_id" not in cols and "reason" not in cols
+    assert set(cols) == {"src_ip", "blocked_at", "expires_at", "status", "action_id"}
 
 
 def test_migration_is_idempotent(legacy_db):
@@ -288,7 +301,7 @@ def test_block_store_reads_migrated_legacy_db(legacy_db):
     blk = store.get_block("198.51.100.77")
     assert blk["status"] == STATUS_ACTIVE
     assert blk["action_id"] is None
-    assert blk["rule_id"] == "RULE-001"
+    assert "rule_id" not in blk
     assert [b["src_ip"] for b in store.get_active_blocks()] == ["198.51.100.77"]
     assert [b["src_ip"] for b in store.get_blocks_by_status(STATUS_REMOVE_FAILED)] \
         == ["198.51.100.99"]

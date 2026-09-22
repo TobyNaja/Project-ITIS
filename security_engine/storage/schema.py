@@ -109,9 +109,9 @@ SCHEMA = (
         blocked_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         action_id INTEGER REFERENCES actions(id),
-        status TEXT NOT NULL,               -- ACTIVE/EXPIRED/MANUALLY_REMOVED/REMOVE_FAILED
-        rule_id TEXT,                       -- ชั่วคราว: จะย้ายไป decisions ใน STEP 5
-        reason TEXT                         -- ชั่วคราว: จะย้ายไป decisions ใน STEP 5
+        status TEXT NOT NULL                -- ACTIVE/EXPIRED/MANUALLY_REMOVED/REMOVE_FAILED
+        -- rule_id/reason ไม่เก็บซ้ำที่นี่ (STEP 5D) — canonical อยู่ที่
+        -- decisions.rule_id / decisions.reason ซึ่งย้อนถึงได้ผ่าน action_id
     )
     """,
     """
@@ -174,6 +174,15 @@ def _migrate_active_blocks(conn) -> None:
         conn.execute(
             "ALTER TABLE active_blocks "
             "ADD COLUMN action_id INTEGER REFERENCES actions(id)")
+
+    # STEP 5D: เลิกเก็บ rule_id/reason ซ้ำใน active_blocks
+    # canonical คือ decisions.rule_id / decisions.reason (ย้อนผ่าน action_id)
+    # *** DB เก่าที่ยังไม่มีตาราง decisions จะไม่มีที่เก็บค่าพวกนี้ ***
+    # ถือเป็นการยอมเสีย metadata ที่ซ้ำซ้อนของ dataset ก่อน alignment
+    # (pre-freeze evidence อยู่ใน docs/evidence ไม่ได้อยู่ในไฟล์ DB นี้)
+    for legacy_column in ("rule_id", "reason"):
+        if legacy_column in columns:
+            conn.execute(f"ALTER TABLE active_blocks DROP COLUMN {legacy_column}")
 
     # D2: UNBLOCKED (ชื่อก่อน alignment) -> EXPIRED ตาม Blueprint §3.4 / T6
     conn.execute("UPDATE active_blocks SET status = ? WHERE status = ?",

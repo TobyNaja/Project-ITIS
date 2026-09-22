@@ -34,6 +34,7 @@ class Decision:
     reason: str
     risk_level: str = ""        # audit/explainability เท่านั้น ไม่ใช่เงื่อนไขของกฎ
     risk_score: float = None    # audit/explainability เท่านั้น
+    allowlisted: bool = False   # สถานะ allowlist ของ source ตอนตัดสิน (decisions.allowlisted)
     block_duration: int = 0     # >0 เฉพาะ BLOCK; lifecycle เอาไปใช้จริง
 
     def __str__(self):
@@ -75,6 +76,7 @@ class RuleEngine:
                     src_ip=src_ip,
                     risk_level=level,
                     risk_score=score,
+                    allowlisted=allowlisted,
                     block_duration=rule.block_duration_sec,
                     reason=self._reason(rule, pattern, allowlisted),
                 )
@@ -85,6 +87,7 @@ class RuleEngine:
             src_ip=src_ip,
             risk_level=level,
             risk_score=score,
+            allowlisted=allowlisted,
             reason=("ไม่เข้าเงื่อนไขของกฎใดเลย — ใช้ default action "
                     f"{self.rules.default_action}"),
         )

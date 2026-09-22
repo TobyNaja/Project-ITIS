@@ -220,7 +220,29 @@ class AuditRepository:
             error=None,
             timestamp=timestamp)
 
-    # ---------- 6. active_blocks link ----------
+    # ---------- 6. recovery_events (FR-13 / M10) ----------
+    def save_recovery_event(self, *, service, attempt, result,
+                            failure_reason=None, error=None, timestamp=None) -> int:
+        """บันทึกทุก attempt ของการกู้ service (§3.4 recovery_events)
+
+        result: SUCCESS / FAIL / CRITICAL
+        failure_reason: PROCESS_DOWN / EVE_STALE (หลายสาเหตุคั่นด้วย ';')
+        """
+        return self._write(
+            "INSERT INTO recovery_events "
+            "(timestamp, service, failure_reason, attempt, result, error) "
+            "VALUES (?,?,?,?,?,?)",
+            (_iso(timestamp), service, failure_reason, attempt, result, error),
+            what="save_recovery_event")
+
+    def get_recovery_events(self, service=None):
+        if service is None:
+            return self._read("SELECT * FROM recovery_events ORDER BY id",
+                              what="get_recovery_events")
+        return self._read("SELECT * FROM recovery_events WHERE service = ? ORDER BY id",
+                          (service,), what="get_recovery_events")
+
+    # ---------- 7. active_blocks link ----------
     def link_active_block_action(self, src_ip, action_id) -> None:
         """ผูก active_blocks ที่ lifecycle สร้างไว้เข้ากับ actions.id
 

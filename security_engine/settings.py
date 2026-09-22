@@ -81,8 +81,16 @@ class BlockConfig:
 
 @dataclass(frozen=True)
 class HealthConfig:
-    check_interval_sec: int
+    check_interval_sec: int         # ความถี่ที่ HealthMonitor ตรวจ
+    stats_interval_sec: int         # ความถี่ที่ Suricata เขียน stats (ค่าของ lab)
     stats_freshness_multiplier: int
+    restart_wait_sec: int
+    restart_command: str = ""       # ว่าง = ยังไม่ได้ตั้ง -> restart ต้องล้มเหลว
+
+    @property
+    def stats_freshness_sec(self) -> int:
+        """เกณฑ์ FR-12: stats ต้องใหม่กว่า stats_interval × multiplier"""
+        return self.stats_interval_sec * self.stats_freshness_multiplier
 
 
 @dataclass(frozen=True)
@@ -214,9 +222,15 @@ def load_settings(config_path=DEFAULT_CONFIG_PATH) -> Settings:
         health=HealthConfig(
             check_interval_sec=_require_int(health, "check_interval_sec",
                                             "health.check_interval_sec", minimum=1),
+            stats_interval_sec=_require_int(health, "stats_interval_sec",
+                                            "health.stats_interval_sec", minimum=1),
             stats_freshness_multiplier=_require_int(
                 health, "stats_freshness_multiplier",
                 "health.stats_freshness_multiplier", minimum=1),
+            restart_wait_sec=_require_int(health, "restart_wait_sec",
+                                          "health.restart_wait_sec", minimum=1),
+            restart_command=_require_str(health, "restart_command",
+                                         "health.restart_command", allow_empty=True),
         ),
         recovery=RecoveryConfig(
             max_attempts=_require_int(recovery, "max_attempts",

@@ -96,19 +96,42 @@ def test_main_passes_host_and_eve_path(clean_env):
         seen["build"] = kwargs
         return "pipeline", "runner", "lock"
 
-    def fake_stream(host, eve_path):
+    def fake_stream(host, eve_path, on_stats=None):
         seen["stream"] = (host, eve_path)
+        seen["on_stats"] = on_stats
         return iter(())
 
+    class FakeMonitor:
+        def on_stats(self, event):
+            seen.setdefault("stats_events", []).append(event)
+
+    fake_monitor = FakeMonitor()
+
+    def fake_health(settings, *, host, repository=None, controller=None):
+        seen["health"] = (host, repository)
+        return fake_monitor, "health_runner"
+
+    def fake_run(p, r, src, health_runner=None):
+        seen["run"] = (p, r)
+        seen["health_runner"] = health_runner
+
     clean_env.setattr(run_phase4, "build_pipeline", fake_build)
+    # ห้ามแตะ data/experiment.db ของจริง (หลักฐาน pre-freeze) ระหว่างรัน test
+    clean_env.setattr(run_phase4, "AuditRepository", lambda db_path: f"repo:{db_path}")
+    clean_env.setattr(run_phase4, "build_health", fake_health)
     clean_env.setattr(run_phase4, "stream_events", fake_stream)
-    clean_env.setattr(run_phase4, "run", lambda p, r, src: seen.setdefault("run", (p, r)))
+    clean_env.setattr(run_phase4, "run", fake_run)
 
     run_phase4.main()
 
     assert seen["stream"] == (HOST, EVE)      # eve_path ไม่ถูกลืม (bug เดิม)
     assert seen["build"]["host"] == HOST
     assert seen["run"] == ("pipeline", "runner")
+    # FR-12: stats callback ต้องถูกต่อเข้า EVE stream จริง ไม่ใช่สร้าง monitor ทิ้งไว้เฉย ๆ
+    assert seen["on_stats"] == fake_monitor.on_stats
+    assert seen["health_runner"] == "health_runner"
+    # audit chain + recovery_events ใช้ repository ตัวเดียวกัน (ไฟล์ DB เดียว)
+    assert seen["health"][1] == seen["build"]["repository"]
 
 
 # ---- 4. env หาย -> main() พังก่อนประกอบระบบ (ไม่แตะ pfSense/db) ----

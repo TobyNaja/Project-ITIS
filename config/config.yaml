@@ -20,8 +20,12 @@ block:
   duration_sec: 300               # §3.6 RULE-001 block_duration_sec
 
 health:
-  check_interval_sec: 15          # FR-12
-  stats_freshness_multiplier: 3   # FR-12: stats ใหม่ภายใน stats_interval × N
+  check_interval_sec: 15          # FR-12: ความถี่ที่ HealthMonitor ตรวจ
+  stats_interval_sec: 8           # ความถี่ที่คาดว่า Suricata เขียน stats (ค่าของ lab)
+  stats_freshness_multiplier: 3   # FR-12: stats ใหม่ภายใน stats_interval × N (=24s)
+  restart_wait_sec: 5             # รอหลัง restart ก่อน functional check (bounded)
+  restart_command: ""             # คำสั่ง restart Suricata บน pfSense — ต้องยืนยันจาก
+                                  # เครื่องจริงก่อนใส่ ว่างไว้ = restart ล้มเหลวเสมอ
 
 recovery:
   max_attempts: 3                 # FR-13: retry สูงสุด 3 ครั้ง

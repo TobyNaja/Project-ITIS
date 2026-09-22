@@ -36,6 +36,10 @@ from security_engine.enforcement.pfsense_enforcer import PFSenseEnforcer
 from security_engine.lifecycle.block_store import BlockStore
 from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
 from security_engine.lifecycle.runner import LifecycleRunner
+from security_engine.health.monitor import HealthMonitor
+from security_engine.health.recovery import RecoveryManager
+from security_engine.health.runner import HealthRunner
+from security_engine.health.suricata_controller import SuricataController
 from security_engine.pipeline import SecurityPipeline
 from security_engine.storage.repository import AuditRepository
 
@@ -100,10 +104,37 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
     return pipeline, runner, shared_lock
 
 
-def run(pipeline, runner, event_source):
+def build_health(settings, *, host, repository=None, controller=None):
+    """ประกอบสาย health/recovery -> คืน (monitor, health_runner)
+
+    แยกจาก build_pipeline เพราะเป็นคนละ concern: pipeline ประมวลผล event
+    ส่วน health ดูว่า "ยังมี event เข้ามาไหม" — และต้องเดินได้แม้ pipeline เงียบ
+
+    monitor.on_stats ที่คืนมา ต้องถูกส่งเข้า stream_events(on_stats=...) ไม่งั้น
+    stats freshness จะไม่มีวันถูกต่ออายุ -> EVE_STALE ปลอมทุก 24 วินาที
+    """
+    controller = controller or SuricataController(
+        host, restart_command=settings.health.restart_command)
+    monitor = HealthMonitor(
+        controller,
+        stats_interval_sec=settings.health.stats_interval_sec,
+        stats_freshness_multiplier=settings.health.stats_freshness_multiplier)
+    recovery = RecoveryManager(
+        controller, monitor, repository=repository,
+        max_attempts=settings.recovery.max_attempts,
+        restart_wait_sec=settings.health.restart_wait_sec)
+    health_runner = HealthRunner(
+        monitor, recovery, interval=settings.health.check_interval_sec,
+        on_error=lambda exc: log.error("health runner error: %s", exc, exc_info=exc))
+    return monitor, health_runner
+
+
+def run(pipeline, runner, event_source, health_runner=None):
     """
     เดิน loop: reconcile -> start runner -> วน event -> shutdown สะอาดใน finally
     event_source = iterable ของ normalized event (production = stream_events())
+
+    health_runner=None -> รันโดยไม่มีสาย health (wiring test / โหมดทดลองเฉพาะ pipeline)
     """
     # FR-10 Restart Resilience: อ่าน state จาก SQLite ก่อนเริ่มทำงาน
     #   หมดอายุระหว่างที่ process ดับ -> ปลดทันที
@@ -112,6 +143,8 @@ def run(pipeline, runner, event_source):
     # ต้องทำ *ก่อน* runner.start() เพื่อให้ state ถูกต้องตั้งแต่ tick แรก
     runner.lifecycle.reconcile()
     runner.start()
+    if health_runner is not None:
+        health_runner.start()               # FR-12: ตรวจสุขภาพแม้ EVE เงียบ
     try:
         for event in event_source:
             # NFR-02: event เดียวพังต้องไม่ล้มทั้ง engine — log แล้วไปตัวถัดไป
@@ -125,7 +158,12 @@ def run(pipeline, runner, event_source):
             log.info("event src_ip=%s matched=%s decision=%s",
                      trace["src_ip"], trace["correlation_matched"], trace["decision"])
     finally:
-        runner.stop()          # stop_event.set() + join -> thread จบสะอาด
+        # health ต้องถูกปิดให้ได้เสมอ แม้ lifecycle runner จะ stop ไม่สำเร็จ
+        try:
+            runner.stop()      # stop_event.set() + join -> thread จบสะอาด
+        finally:
+            if health_runner is not None:
+                health_runner.stop()
 
 
 def main():
@@ -136,13 +174,19 @@ def main():
              settings.risk.weight_set, settings.block.duration_sec)
     host = settings.pfsense_host()          # environment เท่านั้น (NFR-07)
     eve_path = settings.require_eve_path()  # config.yaml หรือ ITIS_EVE_PATH
+    # repository ตัวเดียวกันทั้ง audit chain และ recovery_events (ไฟล์ DB เดียว §3.4)
+    repository = AuditRepository(settings.system.db_path)
     pipeline, runner, _ = build_pipeline(
         host=host,
         db_path=settings.system.db_path,
         min_events=settings.correlation.min_events,
         window_max=float(settings.correlation.window_sec),
+        repository=repository,
     )
-    run(pipeline, runner, stream_events(host, eve_path))
+    monitor, health_runner = build_health(settings, host=host, repository=repository)
+    run(pipeline, runner,
+        stream_events(host, eve_path, on_stats=monitor.on_stats),
+        health_runner=health_runner)
 
 
 if __name__ == "__main__":

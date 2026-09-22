@@ -34,7 +34,10 @@ block:
 
 health:
   check_interval_sec: 15
+  stats_interval_sec: 8
   stats_freshness_multiplier: 3
+  restart_wait_sec: 5
+  restart_command: ""
 
 recovery:
   max_attempts: 3
@@ -71,7 +74,11 @@ def test_valid_config_loads(tmp_path, clean_env):
     assert s.correlation.min_events == 5
     assert s.block.duration_sec == 300
     assert s.health.check_interval_sec == 15
+    assert s.health.stats_interval_sec == 8
     assert s.health.stats_freshness_multiplier == 3
+    assert s.health.stats_freshness_sec == 24        # FR-12: 8 × 3
+    assert s.health.restart_wait_sec == 5
+    assert s.health.restart_command == ""            # ยังไม่ได้ตั้ง = restart ล้มเหลว
     assert s.recovery.max_attempts == 3
     assert s.risk.weight_set == "A"
 
@@ -169,6 +176,8 @@ def test_missing_key_raises_with_path(tmp_path):
     ("stats_freshness_multiplier: 3", "stats_freshness_multiplier: 0",
      "health.stats_freshness_multiplier"),
     ("max_attempts: 3", "max_attempts: 0", "recovery.max_attempts"),
+    ("stats_interval_sec: 8", "stats_interval_sec: 0", "health.stats_interval_sec"),
+    ("restart_wait_sec: 5", "restart_wait_sec: 0", "health.restart_wait_sec"),
 ])
 def test_out_of_range_values_rejected(tmp_path, old, new, bad_key):
     with pytest.raises(ConfigError) as exc:

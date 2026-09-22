@@ -51,9 +51,14 @@ class FakeEnforcer:
 
 @pytest.fixture
 def clean_env(monkeypatch):
-    """เริ่มทุก test จากสถานะที่ไม่มี env ทั้งสองตัว"""
+    """เริ่มทุก test จากสถานะที่ไม่มี env ทั้งสองตัว
+
+    และกัน main() ไม่ให้ตั้ง logging จริง (จะไปเขียน logs/engine.log ของ repo
+    และแย่งคุม root logger กับเทสอื่น)
+    """
     monkeypatch.delenv(run_phase4.ENV_PFSENSE_HOST, raising=False)
     monkeypatch.delenv(run_phase4.ENV_EVE_PATH, raising=False)
+    monkeypatch.setattr(run_phase4, "configure_from_settings", lambda *a, **k: None)
     return monkeypatch
 
 

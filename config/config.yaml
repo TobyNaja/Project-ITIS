@@ -7,6 +7,7 @@
 system:
   db_path: "data/experiment.db"
   log_path: "logs/engine.log"
+  log_level: "INFO"               # NFR-03: DEBUG/INFO/WARNING/ERROR/CRITICAL
 
 eve:
   path: ""                        # เว้นว่างได้ — ตั้งที่นี่หรือ override ด้วย ITIS_EVE_PATH

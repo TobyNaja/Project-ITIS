@@ -16,8 +16,10 @@ Correlation/Risk/Rule/Lifecycle อยู่ในนี้ (อยู่ใน 
 ไฟล์นี้แยก build_pipeline() ออกจาก main() เพื่อให้ wiring test ประกอบระบบได้
 โดยไม่ต้องรัน loop จริง
 """
+import logging
 import threading
 
+from security_engine.logging_config import configure_from_settings
 from security_engine.settings import (          # re-export: ของเดิมที่อ้าง
     ConfigError,                                # run_phase4.ConfigError /
     ENV_EVE_PATH,                               # run_phase4.require_env ยังใช้ได้
@@ -36,6 +38,8 @@ from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
 from security_engine.lifecycle.runner import LifecycleRunner
 from security_engine.pipeline import SecurityPipeline
 from security_engine.storage.repository import AuditRepository
+
+log = logging.getLogger(__name__)
 
 # ---- fallback default ของ build_pipeline (ค่าจริงตอนรันมาจาก config.yaml) ----
 # policy config: กฎมาจาก rules.yaml, allowlist มาจาก allowlist.yaml (NFR-01)
@@ -89,9 +93,10 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                                 lock=shared_lock,
                                 min_events=min_events, window_max=window_max,
                                 repository=repository)
-    runner = LifecycleRunner(lifecycle, shared_lock,
-                             interval=expire_interval,
-                             on_error=lambda e: print(f"[RUNNER ERROR] {e}", flush=True))
+    runner = LifecycleRunner(
+        lifecycle, shared_lock, interval=expire_interval,
+        # NFR-02: error ใน expire loop ต้องถูก log ไม่ใช่ตายเงียบ
+        on_error=lambda exc: log.error("lifecycle runner error: %s", exc, exc_info=exc))
     return pipeline, runner, shared_lock
 
 
@@ -109,12 +114,16 @@ def run(pipeline, runner, event_source):
     runner.start()
     try:
         for event in event_source:
-            trace = pipeline.process(event)
-            print(
-                f"[EVENT] {trace['src_ip']} matched={trace['correlation_matched']} "
-                f"decision={trace['decision']}",
-                flush=True,
-            )
+            # NFR-02: event เดียวพังต้องไม่ล้มทั้ง engine — log แล้วไปตัวถัดไป
+            # (สถานะ enforcement ที่เกิดไปแล้วยังคงถูกต้องตามความจริงเสมอ)
+            try:
+                trace = pipeline.process(event)
+            except Exception as exc:                      # noqa: BLE001 — boundary กันล้ม
+                log.error("ประมวลผล event ไม่สำเร็จ (src_ip=%s): %s",
+                          event.get("src_ip"), exc, exc_info=exc)
+                continue
+            log.info("event src_ip=%s matched=%s decision=%s",
+                     trace["src_ip"], trace["correlation_matched"], trace["decision"])
     finally:
         runner.stop()          # stop_event.set() + join -> thread จบสะอาด
 
@@ -122,6 +131,9 @@ def run(pipeline, runner, event_source):
 def main():
     # อ่าน+validate config ให้ครบก่อน -> ค่าหาย/เสียจะพังก่อนแตะ pfSense หรือสร้าง db
     settings = load_settings()
+    configure_from_settings(settings)       # NFR-03: log ลง logs/engine.log
+    log.info("เริ่ม ITIS engine (weight_set=%s, block_duration=%ss)",
+             settings.risk.weight_set, settings.block.duration_sec)
     host = settings.pfsense_host()          # environment เท่านั้น (NFR-07)
     eve_path = settings.require_eve_path()  # config.yaml หรือ ITIS_EVE_PATH
     pipeline, runner, _ = build_pipeline(

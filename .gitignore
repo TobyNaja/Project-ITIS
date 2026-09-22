@@ -19,6 +19,7 @@ ENV/
 !*.pub
 
 # Logs / local data dumps
+logs/
 *.log
 eve.json
 *.jsonl

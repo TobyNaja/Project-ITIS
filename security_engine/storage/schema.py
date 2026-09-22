@@ -140,13 +140,17 @@ SCHEMA = (
 )
 
 
-def connect(db_path) -> sqlite3.Connection:
+DEFAULT_SQLITE_TIMEOUT = 5.0        # NFR-02: external call ต้องมี timeout
+
+
+def connect(db_path, timeout=DEFAULT_SQLITE_TIMEOUT) -> sqlite3.Connection:
     """เปิด connection พร้อม PRAGMA ที่ NFR-05 กำหนด
 
     foreign_keys ต้องตั้งใหม่ทุก connection (SQLite default OFF)
     ส่วน journal_mode=WAL ติดกับไฟล์ DB — ตั้งซ้ำไม่เสียหาย
+    timeout กัน pipeline thread กับ lifecycle runner ชนกันแล้วค้างไม่มีกำหนด
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=timeout)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn

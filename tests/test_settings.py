@@ -20,6 +20,7 @@ VALID_YAML = """\
 system:
   db_path: "data/experiment.db"
   log_path: "logs/engine.log"
+  log_level: "INFO"
 
 eve:
   path: "/var/log/suricata/suricata_test0/eve.json"
@@ -65,6 +66,7 @@ def test_valid_config_loads(tmp_path, clean_env):
     s = load_settings(write_config(tmp_path))
     assert s.system.db_path == "data/experiment.db"
     assert s.system.log_path == "logs/engine.log"
+    assert s.system.log_level == "INFO"
     assert s.correlation.window_sec == 10
     assert s.correlation.min_events == 5
     assert s.block.duration_sec == 300
@@ -233,6 +235,42 @@ def test_config_file_has_no_pfsense_host():
     text = st.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
     assert "192.168" not in text            # ไม่มี IP ของ lab หลุดเข้า repo
     assert "admin@" not in text
+
+
+# ---- 12. system.log_level (NFR-03) ----
+@pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+def test_valid_log_levels(tmp_path, clean_env, level):
+    s = load_settings(write_config(tmp_path, VALID_YAML.replace(
+        'log_level: "INFO"', f'log_level: "{level}"')))
+    assert s.system.log_level == level
+
+
+def test_log_level_is_normalised_to_upper(tmp_path, clean_env):
+    s = load_settings(write_config(tmp_path, VALID_YAML.replace(
+        'log_level: "INFO"', 'log_level: "debug"')))
+    assert s.system.log_level == "DEBUG"
+
+
+@pytest.mark.parametrize("level", ["VERBOSE", "TRACE", "warn"])
+def test_invalid_log_level_rejected(tmp_path, level):
+    with pytest.raises(ConfigError) as exc:
+        load_settings(write_config(tmp_path, VALID_YAML.replace(
+            'log_level: "INFO"', f'log_level: "{level}"')))
+    assert "log_level" in str(exc.value)
+
+
+def test_missing_log_level_raises(tmp_path):
+    without_level = "\n".join(
+        l for l in VALID_YAML.splitlines() if "log_level" not in l) + "\n"
+    with pytest.raises(ConfigError) as exc:
+        load_settings(write_config(tmp_path, without_level))
+    assert "system.log_level" in str(exc.value)
+
+
+def test_repo_config_log_settings(clean_env):
+    s = load_settings()
+    assert s.system.log_path == "logs/engine.log"
+    assert s.system.log_level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
 if __name__ == "__main__":

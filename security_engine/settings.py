@@ -29,6 +29,7 @@ ENV_PFSENSE_HOST = "ITIS_PFSENSE_HOST"
 ENV_EVE_PATH = "ITIS_EVE_PATH"
 
 VALID_WEIGHT_SETS = ("A", "B", "C")
+VALID_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
 class ConfigError(Exception):
@@ -59,6 +60,7 @@ def env_override(name: str) -> str:
 class SystemConfig:
     db_path: str
     log_path: str
+    log_level: str
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,11 @@ def load_settings(config_path=DEFAULT_CONFIG_PATH) -> Settings:
     recovery = _section(data, "recovery")
     risk = _section(data, "risk")
 
+    log_level = _require_str(system, "log_level", "system.log_level").upper()
+    if log_level not in VALID_LOG_LEVELS:
+        raise ConfigError(
+            f"system.log_level ต้องเป็นหนึ่งใน {VALID_LOG_LEVELS} ได้ {log_level!r}")
+
     weight_set = _require_str(risk, "weight_set", "risk.weight_set")
     if weight_set not in VALID_WEIGHT_SETS:
         raise ConfigError(
@@ -191,6 +198,7 @@ def load_settings(config_path=DEFAULT_CONFIG_PATH) -> Settings:
         system=SystemConfig(
             db_path=_require_str(system, "db_path", "system.db_path"),
             log_path=_require_str(system, "log_path", "system.log_path"),
+            log_level=log_level,
         ),
         eve=EveConfig(path=eve_path),
         correlation=CorrelationConfig(

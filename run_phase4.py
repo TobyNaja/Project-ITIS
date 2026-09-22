@@ -28,6 +28,7 @@ from security_engine.settings import (          # re-export: ของเดิ�
 from security_engine.ingestion.eve_reader import stream_events
 from security_engine.correlation.engine import CorrelationEngine
 from security_engine.policy.rule_engine import RuleEngine
+from security_engine.policy.rules_config import load_rules
 from security_engine.policy.allowlist import load_allowlist
 from security_engine.enforcement.pfsense_enforcer import PFSenseEnforcer
 from security_engine.lifecycle.block_store import BlockStore
@@ -36,8 +37,9 @@ from security_engine.lifecycle.runner import LifecycleRunner
 from security_engine.pipeline import SecurityPipeline
 
 # ---- fallback default ของ build_pipeline (ค่าจริงตอนรันมาจาก config.yaml) ----
-# STEP 1: allowlist ยังเป็น .txt — จะย้ายไป config/allowlist.yaml ใน STEP 3
-ALLOWLIST_PATH = "config/allowlist.txt"
+# policy config: กฎมาจาก rules.yaml, allowlist มาจาก allowlist.yaml (NFR-01)
+ALLOWLIST_PATH = "config/allowlist.yaml"
+RULES_PATH = "config/rules.yaml"
 DB_PATH = "data/security_engine.db"
 MIN_EVENTS = 5
 WINDOW_MAX = 10.0
@@ -49,6 +51,7 @@ EXPIRE_INTERVAL_SEC = 1.0
 
 
 def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
+                   rules_path=RULES_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
                    window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
                    enforcer=None, correlator=None):
@@ -60,14 +63,15 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
     (inject enforcer แล้ว host ไม่ถูกใช้เลย -> test ไม่ต้องตั้ง env)
     """
     allowlist = load_allowlist(allowlist_path)
+    rules = load_rules(rules_path)
 
     # window_max ส่งเป็น float ตรงๆ — timedelta(seconds=...) รองรับ float
     # (ห้าม int() เพราะถ้า window_max=2.5 จะถูกตัดเหลือ 2 -> Correlation กับ Risk
     #  ใช้ window คนละค่า)
     correlator = correlator or CorrelationEngine(
         window_seconds=window_max, min_events=min_events)
-    rule_engine = RuleEngine(allowlist=allowlist,
-                             min_events=min_events, max_window=window_max)
+    # กฎทั้งหมดมาจาก rules.yaml — min_events/window_max เป็นของ CorrelationEngine
+    rule_engine = RuleEngine(rules, allowlist=allowlist)
     enforcer = enforcer or PFSenseEnforcer(host or require_env(ENV_PFSENSE_HOST))
     store = BlockStore(db_path)
     lifecycle = BlockLifecycleManager(enforcer, store)

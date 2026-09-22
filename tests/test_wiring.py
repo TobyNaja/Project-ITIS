@@ -54,8 +54,8 @@ class FakeCorrelator:
 
 @pytest.fixture
 def allowlist_file(tmp_path):
-    f = tmp_path / "allowlist.txt"
-    f.write_text("10.9.9.9\n", encoding="utf-8")
+    f = tmp_path / "allowlist.yaml"
+    f.write_text('allowlist:\n  - "10.9.9.9"\n', encoding="utf-8")
     return f
 
 

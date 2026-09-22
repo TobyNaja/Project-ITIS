@@ -7,18 +7,21 @@ run_experiment.py — Phase 12 Synthetic Experiment Runner (mode: logic / enforc
 *** ทุก trace มี input_mode="synthetic" *** — กันเอา synthetic ไปปนกับ real (Mode C)
 *** Mode C (real Suricata) อยู่ในไฟล์แยก run_experiment_real.py — ไม่ปนกับตัวนี้ ***
 
-Scenarios (4 clean outcomes ที่ risk model ผลิตได้จริงที่ min_events=5):
-  A1  < min_events (4 events)          -> correlation ไม่ match -> decision=None
-  A2  sev3 กระจาย 5 dest (MEDIUM)      -> ALERT   (RULE-002)
-  A3  sev1 เป้าเดียว 5 ครั้ง (CRITICAL) -> BLOCK   (RULE-001)
-  A4  allowlisted + sev1               -> NO_AUTO_BLOCK (RULE-003 มาก่อน RULE-001)
+Scenarios — decision มาจาก rules.yaml (raw Suricata severity ไม่ใช่ risk_level):
+  A1  < min_same_src_events (4 events)  -> correlation ไม่ match -> decision=None
+  A2  severity 2 (MEDIUM) × 5 ใน ≤10s   -> ALERT          (RULE-002)
+  A3  severity 1 (HIGH) × 5 ใน ≤10s     -> BLOCK          (RULE-001)
+  A4  allowlisted + severity 1          -> NO_AUTO_BLOCK  (RULE-003 priority 1)
+
+*** ชื่อ A1–A4 เป็น internal label ***
+mapping กับ test case ของ Blueprint: A1→T10 · A2→T3 · A3→T4 · A4→T5
+รายงานต้องใช้ T-number เป็น canonical ID (ดู docs/blueprint-gap-matrix.md)
 
 *** ทำไมไม่มี MONITOR scenario ***
-MONITOR = default action (correlation match แต่ตกทั้ง RULE-001 และ RULE-002).
-แต่พอ correlation match ที่ min_events=5, frequency factor (F) clamp สูงเกือบ 25
-แต้มทันที บวก temporal/severity แล้วค่าแทบไม่มีทางตกไปถึง LOW (<30) ที่จะ fall
-through เป็น MONITOR ได้ — เป็นคุณสมบัติของ risk model เอง ไม่ใช่ scenario ที่
-"ลืมทำ". MONITOR ยังทดสอบได้ที่ระดับ unit test ของ RuleEngine (default path).
+MONITOR = default_action เมื่อไม่มีกฎใด match — หลัง STEP 3 เส้นทางนี้เกิดได้จริง
+เช่น severity 3 (LOW) × 5 ที่ไม่เข้าเงื่อนไข min_severity ของ RULE-001/002
+ตอนนี้ครอบด้วย unit test ของ RuleEngine (default path) ยังไม่ได้ทำเป็น scenario
+ของ runner — จะจัดชุด T1–T11 ให้ครบใน STEP 10
 
 --- Resilience (enforcement mode) ---
 enforcement mode ยิง SSH -> pfSense จริง ซึ่งอาจ timeout เป็นครั้งคราว (GNS3/pfSense
@@ -47,6 +50,7 @@ import time
 
 from security_engine.correlation.engine import CorrelationEngine
 from security_engine.policy.rule_engine import RuleEngine
+from security_engine.policy.rules_config import load_rules
 from security_engine.enforcement.pfsense_enforcer import PFSenseEnforcer, EnforcementError
 from security_engine.lifecycle.block_store import BlockStore
 from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
@@ -93,9 +97,9 @@ def _events_now(src, dest_ips, severity):
 def scenario_events(scenario_id):
     if scenario_id == "A1":     # < min_events (4) -> correlation ไม่ match -> decision=None
         return _events_now(TEST_SRC, ["w", "x", "y", "z"], 1), None
-    if scenario_id == "A2":     # MEDIUM -> ALERT (sev3 กระจาย 5 dest = R~MEDIUM)
-        return _events_now(TEST_SRC, ["a", "b", "c", "d", "e"], 3), "ALERT"
-    if scenario_id == "A3":     # HIGH/CRITICAL -> BLOCK (sev1 เป้าเดียว 5 ครั้ง)
+    if scenario_id == "A2":     # MEDIUM -> ALERT (RULE-002: severity 2 = MEDIUM จริง)
+        return _events_now(TEST_SRC, ["a", "b", "c", "d", "e"], 2), "ALERT"
+    if scenario_id == "A3":     # HIGH -> BLOCK (RULE-001: severity 1 = HIGH)
         return _events_now(TEST_SRC, ["x"] * 5, 1), "BLOCK"
     if scenario_id == "A4":     # allowlisted -> NO_AUTO_BLOCK (RULE-003 มาก่อน)
         return _events_now(ALLOWLISTED_SRC, ["x"] * 5, 1), "NO_AUTO_BLOCK"
@@ -104,8 +108,7 @@ def scenario_events(scenario_id):
 
 def build(mode, host, db_path):
     correlator = CorrelationEngine(window_seconds=WINDOW_MAX, min_events=MIN_EVENTS)
-    rule = RuleEngine(allowlist={ALLOWLISTED_SRC}, min_events=MIN_EVENTS,
-                      max_window=WINDOW_MAX)
+    rule = RuleEngine(load_rules(), allowlist={ALLOWLISTED_SRC})
     enforcer = FakeEnforcer() if mode == "logic" else PFSenseEnforcer(host)
     store = BlockStore(db_path)
     lifecycle = BlockLifecycleManager(enforcer, store)

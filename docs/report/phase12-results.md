@@ -1,5 +1,24 @@
 # บทที่ 4 ผลการทดลอง (Phase 12)
 
+> ## ⚠️ PRE-FREEZE — historical evidence ไม่ใช่ผลการทดลองสุดท้าย
+>
+> บทนี้บันทึกผลของ **implementation ก่อน Blueprint alignment** (tag `phase12-pre-freeze`
+> = commit `4ccb83f`) ตัวเลขทุกค่าในบทนี้ถูกต้องตามสิ่งที่รันจริง ณ เวลานั้น และ
+> **ห้าม regenerate ย้อนหลัง** เพื่อให้ตรงกับ implementation ปัจจุบัน
+>
+> สิ่งที่เปลี่ยนไปหลังจากนั้น (ดู `docs/blueprint-alignment-plan.md`):
+> - **Risk Model** — normalization ของ factor F/T/C เปลี่ยนเป็น lookup ตาม Blueprint §3.5
+>   ดังนั้น **risk score/level ในบทนี้ไม่เทียบกับผลหลัง alignment ได้**
+> - **Rule Engine** — เงื่อนไขใช้ raw Suricata severity ไม่ใช่ risk level ทำให้
+>   scenario `A2` ของ runner ปัจจุบันเป็น severity 2 (MEDIUM จริง) ส่วนตารางในบทนี้
+>   บันทึกไว้ตามของเดิมคือ severity 3 ซึ่งตาม mapping ที่ล็อกไว้คือ **LOW ไม่ใช่ MEDIUM**
+>   — เป็น terminology ที่ขัดกันของเวอร์ชันก่อน alignment ไม่ใช่ตัวเลขที่ผิด
+> - ชื่อ `A1–A4` เป็น internal label; canonical ID ของ Blueprint คือ `T10/T3/T4/T5`
+>
+> ผล latency (detection / decision / enforcement / end-to-end) ยังใช้อ้างอิงได้ในฐานะ
+> engineering measurement ของเวอร์ชันนั้น **แต่ไม่ใช่ evidence ของ Phase 14/15**
+> ซึ่งต้องรันใหม่หลัง alignment เสร็จครบ
+
 > ตัวเลขทั้งหมดในบทนี้มาจาก `docs/evidence/P12-ANALYSIS/latency_summary.json`
 > ซึ่งคำนวณจาก `docs/evidence/P12-ENFORCEMENT/traces_enf.jsonl` (120 records)
 > reproduce ได้ด้วย:

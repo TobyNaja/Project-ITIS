@@ -39,7 +39,8 @@ def test_a2_medium_alert():
     events, expected = rx.scenario_events("A2")
     assert len(events) == 5 and expected == "ALERT"
     assert {e["dest_ip"] for e in events} == {"a", "b", "c", "d", "e"}
-    assert all(e["severity"] == 3 for e in events)
+    # RULE-002 ใช้ raw severity: MEDIUM = Suricata severity 2 (ไม่ใช่ risk_level)
+    assert all(e["severity"] == 2 for e in events)
 
 
 def test_a3_critical_block():
@@ -125,6 +126,7 @@ def _patch_build(monkeypatch, enforcer):
     """บังคับ build() ให้ใช้ enforcer ที่กำหนด (BlockLifecycleManager จริง)"""
     from security_engine.correlation.engine import CorrelationEngine
     from security_engine.policy.rule_engine import RuleEngine
+    from security_engine.policy.rules_config import load_rules
     from security_engine.lifecycle.block_store import BlockStore
     from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
     from security_engine.pipeline import SecurityPipeline
@@ -132,8 +134,7 @@ def _patch_build(monkeypatch, enforcer):
 
     def fake_build(mode, host, db_path):
         corr = CorrelationEngine(window_seconds=rx.WINDOW_MAX, min_events=rx.MIN_EVENTS)
-        rule = RuleEngine(allowlist={rx.ALLOWLISTED_SRC}, min_events=rx.MIN_EVENTS,
-                          max_window=rx.WINDOW_MAX)
+        rule = RuleEngine(load_rules(), allowlist={rx.ALLOWLISTED_SRC})
         store = BlockStore(db_path)
         lifecycle = BlockLifecycleManager(enforcer, store)
         pipe = SecurityPipeline(corr, rule, lifecycle, lock=threading.Lock(),

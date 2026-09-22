@@ -3,7 +3,7 @@ tests/test_runtime_config.py — Phase 11.3 Runtime Configuration
 
 พิสูจน์ว่า entry point รันได้จริงด้วย configuration ที่ reproducible:
     ITIS_PFSENSE_HOST / ITIS_EVE_PATH -> main() -> stream_events(host, eve_path)
-    config/allowlist.txt (default policy file) -> load_allowlist() -> RuleEngine
+    config/allowlist.yaml (default policy file) -> load_allowlist() -> RuleEngine
 
 ไม่แตะ pfSense จริง: monkeypatch stream_events/run และ inject FakeEnforcer
 """

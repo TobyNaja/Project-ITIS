@@ -35,6 +35,7 @@ from security_engine.lifecycle.block_store import BlockStore
 from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
 from security_engine.lifecycle.runner import LifecycleRunner
 from security_engine.pipeline import SecurityPipeline
+from security_engine.storage.repository import AuditRepository
 
 # ---- fallback default ของ build_pipeline (ค่าจริงตอนรันมาจาก config.yaml) ----
 # policy config: กฎมาจาก rules.yaml, allowlist มาจาก allowlist.yaml (NFR-01)
@@ -54,13 +55,16 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                    rules_path=RULES_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
                    window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
-                   enforcer=None, correlator=None):
+                   enforcer=None, correlator=None, repository=None):
     """
     ประกอบ component ทั้งหมด -> คืน (pipeline, runner, shared_lock)
     เปิดให้ inject enforcer/correlator เพื่อ wiring test (ไม่ต้องต่อ pfSense จริง)
 
     host=None + ไม่ inject enforcer -> อ่าน ITIS_PFSENSE_HOST จาก environment
     (inject enforcer แล้ว host ไม่ถูกใช้เลย -> test ไม่ต้องตั้ง env)
+
+    repository=None -> สร้าง AuditRepository บน db_path เดียวกับ BlockStore
+    (audit chain §3.4 ต้องอยู่ไฟล์เดียวกับ active_blocks ถึงจะ join ได้)
     """
     allowlist = load_allowlist(allowlist_path)
     rules = load_rules(rules_path)
@@ -74,14 +78,17 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
     rule_engine = RuleEngine(rules, allowlist=allowlist)
     enforcer = enforcer or PFSenseEnforcer(host or require_env(ENV_PFSENSE_HOST))
     store = BlockStore(db_path)
-    lifecycle = BlockLifecycleManager(enforcer, store)
+    repository = repository or AuditRepository(db_path)
+    # lifecycle บันทึก UNBLOCK action เอง (STEP 6D) ส่วน BLOCK action บันทึกที่ pipeline
+    lifecycle = BlockLifecycleManager(enforcer, store, repository=repository)
 
     # shared lock: Pipeline (block) + Runner (expire_due) ใช้ตัวเดียวกัน
     shared_lock = threading.Lock()
 
     pipeline = SecurityPipeline(correlator, rule_engine, lifecycle,
                                 lock=shared_lock,
-                                min_events=min_events, window_max=window_max)
+                                min_events=min_events, window_max=window_max,
+                                repository=repository)
     runner = LifecycleRunner(lifecycle, shared_lock,
                              interval=expire_interval,
                              on_error=lambda e: print(f"[RUNNER ERROR] {e}", flush=True))
@@ -90,9 +97,15 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
 
 def run(pipeline, runner, event_source):
     """
-    เดิน loop: start runner -> วน event -> shutdown สะอาดใน finally
+    เดิน loop: reconcile -> start runner -> วน event -> shutdown สะอาดใน finally
     event_source = iterable ของ normalized event (production = stream_events())
     """
+    # FR-10 Restart Resilience: อ่าน state จาก SQLite ก่อนเริ่มทำงาน
+    #   หมดอายุระหว่างที่ process ดับ -> ปลดทันที
+    #   REMOVE_FAILED ที่ค้าง        -> retry
+    #   ยังไม่หมดอายุ                -> คง ACTIVE ไว้ (timer เดินต่อด้วย runner)
+    # ต้องทำ *ก่อน* runner.start() เพื่อให้ state ถูกต้องตั้งแต่ tick แรก
+    runner.lifecycle.reconcile()
     runner.start()
     try:
         for event in event_source:

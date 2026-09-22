@@ -73,6 +73,8 @@ class SecurityPipeline:
             "decision": None,                           # None = ยังไม่เข้า Rule Engine
             "decision_id": None,                        # audit: decisions.id
             "action_id": None,                          # audit: actions.id
+            "duplicate_block": False,                   # FR-11: ถูกระงับเพราะ block ซ้ำ
+            "block_suppressed": False,                  # ไม่มีคำสั่งถูกส่งไป pfSense
         }
 
         # --- Ingestion audit (ต้องมาก่อน correlate: pattern ใช้ _db_id ของ event) ---
@@ -118,6 +120,8 @@ class SecurityPipeline:
                 result = self.lifecycle.block(decision)
                 if result.success:
                     trace["t5_enforce_ok"] = time.monotonic()
+                trace["duplicate_block"] = getattr(result, "duplicate", False)
+                trace["block_suppressed"] = getattr(result, "suppressed", False)
 
                 # audit หลัง enforcement — บันทึกผลจริงของ pfSense ตามที่เกิดขึ้น
                 # *** ห้ามแก้ผล enforcement เพราะ audit ล้ม *** (NFR-06):
@@ -138,6 +142,11 @@ class SecurityPipeline:
           ไปก่อนที่จะ link ทัน
         """
         if self.repository is None or decision_id is None:
+            return
+        # suppressed = ไม่มีคำสั่งถูกส่งไป pfSense เลย (duplicate ACTIVE หรือค้าง
+        # REMOVE_FAILED) -> ไม่มี action ให้บันทึก การบันทึกเป็น FAIL จะเป็นการ
+        # โกหกว่าพยายาม enforce แล้วล้ม
+        if getattr(result, "suppressed", False):
             return
         action_id = self.repository.save_enforcement_action(
             decision_id, result, duration_sec=decision.block_duration)

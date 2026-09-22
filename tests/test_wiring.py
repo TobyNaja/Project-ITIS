@@ -16,7 +16,10 @@ from security_engine.policy.rule_engine import BLOCK
 
 # ---- fakes ----
 class FakeResult:
-    def __init__(self, ok=True):
+    """contract เดียวกับ EnforcementResult (audit ใช้ action/ip ด้วย)"""
+    def __init__(self, ok=True, action="add", ip=None):
+        self.action = action
+        self.ip = ip
         self.command_ok = ok
         self.verified = ok
         self.success = ok
@@ -31,11 +34,11 @@ class FakeEnforcer:
 
     def add_block(self, ip):
         self.added.append(ip)
-        return FakeResult(True)
+        return FakeResult(True, action="add", ip=ip)
 
     def remove_block(self, ip):
         self.removed.append(ip)
-        return FakeResult(True)
+        return FakeResult(True, action="remove", ip=ip)
 
     def is_blocked(self, ip):
         return ip in self.added and ip not in self.removed
@@ -45,11 +48,23 @@ class FakeEnforcer:
 
 
 class FakeCorrelator:
+    """คืน pattern ที่กำหนดไว้ แต่ใช้ **event object จริง** ที่ผ่าน pipeline มา
+
+    หลัง STEP 5B pipeline บันทึก security_events แล้วแปะ _db_id ลงบน event object
+    ก่อนส่งเข้า correlator — pattern จึงต้องพก event ตัวเดียวกันกลับไป ไม่งั้น
+    audit จะสร้าง event_ids ไม่ได้ (ห้ามเดา id)
+    """
     def __init__(self, match=None):
         self.match = match
+        self.seen = []
 
     def process(self, event):
-        return self.match
+        self.seen.append(event)
+        if self.match is None:
+            return None
+        pattern = dict(self.match)
+        pattern["events"] = tuple(self.seen)
+        return pattern
 
 
 @pytest.fixture
@@ -91,10 +106,11 @@ def test_shared_lock_is_same(tmp_path, allowlist_file):
 def test_events_flow_through_pipeline(tmp_path, allowlist_file):
     # match ที่ให้ BLOCK: sev1 เป้าเดียว 5 events window แคบ -> CRITICAL
     match = {"src_ip": "1.2.3.4", "event_count": 5, "window_seconds": 1.0,
-             "events": [{"dest_ip": "x", "severity": 1} for _ in range(5)]}
+             "max_severity": 1}
     pipeline, runner, lock, enf = _build(tmp_path, allowlist_file, match=match)
 
-    events = [{"src_ip": "1.2.3.4", "timestamp": "2026-09-20T10:00:00+00:00",
+    events = [{"src_ip": "1.2.3.4", "dest_ip": "x", "severity": 1,
+               "timestamp": "2026-09-20T10:00:00+00:00",
                "received_at": "2026-09-20T10:00:00+00:00"}]
 
     run_phase4.run(pipeline, runner, events)   # start -> วน -> finally stop

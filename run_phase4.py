@@ -9,10 +9,13 @@ Correlation/Risk/Rule/Lifecycle อยู่ในนี้ (อยู่ใน 
     for event in stream_events(): pipeline.process(event)   [main thread]
     finally: runner.stop()                                    [shutdown สะอาด]
 
-รันจริงบน SEC01/คอมหลัก (ต่อ pfSense + Suricata) = Phase 12
+รันจริงบน SEC01/คอมหลัก (ต่อ pfSense + Suricata) = Phase 12 — ต้องตั้ง env ก่อน:
+    $env:ITIS_PFSENSE_HOST = "admin@..."
+    $env:ITIS_EVE_PATH     = "/var/log/suricata/<iface>/eve.json"
 ไฟล์นี้แยก build_pipeline() ออกจาก main() เพื่อให้ wiring test ประกอบระบบได้
 โดยไม่ต้องรัน loop จริง
 """
+import os
 import threading
 
 from security_engine.ingestion.eve_reader import stream_events
@@ -25,8 +28,11 @@ from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
 from security_engine.lifecycle.runner import LifecycleRunner
 from security_engine.pipeline import SecurityPipeline
 
-# ---- config (Phase 11: hard-code default; ต่อไปย้ายเข้าไฟล์ config) ----
-PFSENSE_HOST = "admin@192.168.227.150"
+# ---- runtime config (machine-specific -> environment เท่านั้น ห้าม hard-code lab) ----
+ENV_PFSENSE_HOST = "ITIS_PFSENSE_HOST"
+ENV_EVE_PATH = "ITIS_EVE_PATH"
+
+# ---- application default (policy/ไฟล์ของ project ไม่ใช่ค่าของเครื่อง) ----
 ALLOWLIST_PATH = "config/allowlist.txt"
 DB_PATH = "data/security_engine.db"
 MIN_EVENTS = 5
@@ -34,13 +40,32 @@ WINDOW_MAX = 10.0
 EXPIRE_INTERVAL = 1.0
 
 
-def build_pipeline(*, host=PFSENSE_HOST, allowlist_path=ALLOWLIST_PATH,
+class ConfigError(Exception):
+    """environment variable ที่จำเป็นไม่ได้ตั้งไว้"""
+
+
+def require_env(name: str) -> str:
+    """อ่าน env ที่จำเป็น — ไม่มีหรือว่าง = พังทันที
+    (fail fast ดีกว่าปล่อยให้ไป ssh ผิดเครื่อง/อ่านไฟล์ผิดตัวแล้วค่อยรู้)"""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ConfigError(
+            f"ต้องตั้ง environment variable {name} ก่อนรัน "
+            f'(เช่น $env:{name} = "..." — ดูตัวอย่างใน .env.example)'
+        )
+    return value
+
+
+def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
                    window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL,
                    enforcer=None, correlator=None):
     """
     ประกอบ component ทั้งหมด -> คืน (pipeline, runner, shared_lock)
     เปิดให้ inject enforcer/correlator เพื่อ wiring test (ไม่ต้องต่อ pfSense จริง)
+
+    host=None + ไม่ inject enforcer -> อ่าน ITIS_PFSENSE_HOST จาก environment
+    (inject enforcer แล้ว host ไม่ถูกใช้เลย -> test ไม่ต้องตั้ง env)
     """
     allowlist = load_allowlist(allowlist_path)
 
@@ -51,7 +76,7 @@ def build_pipeline(*, host=PFSENSE_HOST, allowlist_path=ALLOWLIST_PATH,
         window_seconds=window_max, min_events=min_events)
     rule_engine = RuleEngine(allowlist=allowlist,
                              min_events=min_events, max_window=window_max)
-    enforcer = enforcer or PFSenseEnforcer(host)
+    enforcer = enforcer or PFSenseEnforcer(host or require_env(ENV_PFSENSE_HOST))
     store = BlockStore(db_path)
     lifecycle = BlockLifecycleManager(enforcer, store)
 
@@ -86,8 +111,11 @@ def run(pipeline, runner, event_source):
 
 
 def main():
-    pipeline, runner, _ = build_pipeline()
-    run(pipeline, runner, stream_events(PFSENSE_HOST))
+    # อ่าน config ให้ครบก่อน -> env หายจะพังก่อนแตะ pfSense หรือสร้างไฟล์ db
+    host = require_env(ENV_PFSENSE_HOST)
+    eve_path = require_env(ENV_EVE_PATH)
+    pipeline, runner, _ = build_pipeline(host=host)
+    run(pipeline, runner, stream_events(host, eve_path))
 
 
 if __name__ == "__main__":

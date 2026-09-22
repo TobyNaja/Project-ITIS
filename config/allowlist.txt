@@ -1,0 +1,4 @@
+# ITIS source-IP allowlist (default policy: empty = ไม่มี IP ไหนถูก bypass)
+# One IPv4/IPv6 address per line.
+# Blank lines and comments are ignored; inline comment ใช้ได้ เช่น "1.2.3.4  # gateway"
+# invalid IP -> AllowlistError (strict โดยตั้งใจ: safety config ต้องพังให้รู้ทันที)

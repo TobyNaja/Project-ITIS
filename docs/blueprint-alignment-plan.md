@@ -106,7 +106,11 @@ override ที่ RULE-003 ในชั้น Rule Engine — Risk ≠ Decision
 Set A=79.5 HIGH · Set B=80.5 CRITICAL · Set C=78.5 HIGH — ข้าม threshold 80 ที่ Set B
 แต่ decision เป็น BLOCK ทั้งสาม set เพราะ RULE-001 ครอบ "HIGH หรือสูงกว่า"
 
-### STEP 2B — Asset discovery + resolver integration (ยังไม่ทำ, รอ lab online)
+### STEP 2B — Asset discovery + resolver integration (ทำแล้ว 2026-09-23)
+
+ปิดแล้วที่ `b8dd672` — `config/assets.yaml` = `assets: []` (ไม่มี asset ที่ยืนยัน role ได้),
+`load_source_context()` ต่อเข้าทั้ง `run_experiment.py` และ `run_phase4.py` ·
+หลักฐาน: `docs/evidence/step2b_source_context_2026-09-23.md` · ส่วนด้านล่างคือบันทึกเดิมก่อนแก้
 
 **Known limitation ของ STEP 2A ที่ต้องปิดใน 2B:**
 

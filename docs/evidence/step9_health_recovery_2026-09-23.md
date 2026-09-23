@@ -5,7 +5,7 @@
 ป้ายกำกับ: **[observed]** = วัด/อ่านได้จริง · **[config]** = ค่าที่ตั้งไว้ ·
 **[decision]** = ข้อตัดสินใจของผู้วิจัย · **[interpretation]** = การตีความ
 
-สถานะ: ส่วน A (stats path + persistence) **เสร็จ** · ส่วน B (HealthMonitor / recovery runtime) **ยังไม่รัน**
+สถานะ: ส่วน A (stats path + persistence) **เสร็จ** · ส่วน B (HealthMonitor / recovery runtime) **เสร็จ** — ดู B0–B7
 
 ## Environment
 
@@ -152,15 +152,192 @@ reg add HKLM\SYSTEM\CurrentControlSet\Services\W32Time\Config /v MaxAllowedPhase
 w32tm /config /update
 ```
 
-## B. HealthMonitor / Recovery runtime — ยังไม่รัน
+## B. HealthMonitor / Recovery runtime (FR-12 / FR-13 / NFR-06)
 
-- 9.1 HEALTHY (process + fresh stats) / DEGRADED (process หยุด หรือ stats ค้าง > 30 s)
-- 9.2 DEGRADED -> `/usr/local/etc/rc.d/suricata.sh restart` -> functional check -> HEALTHY
-- 9.3 recovery ล้ม ×3 -> CRITICAL · ไม่มี attempt 4 · `recovery_events` ครบทุก attempt
-- 9.4 CRITICAL latch
+**[config]** `health.restart_command: "/usr/local/etc/rc.d/suricata.sh restart"` (commit `eeb3aab`) ·
+check_interval 15 s · freshness 30 s · restart_wait 5 s · recovery.max_attempts 3
 
-**[config]** `health.restart_command` ใน `config/config.yaml` ยังเป็น `""` — ต้องตั้งเป็นคำสั่งที่พิสูจน์แล้ว
-(A3) ก่อนทดสอบ 9.2
+วิธีรัน: `run_phase4.main()` ผ่าน scratch wrapper ที่เปิด DEBUG เฉพาะ logger `security_engine.health`
+(HEALTHY และ "ได้รับ EVE stats event" log ที่ระดับ DEBUG) — ไม่แก้ repo/config ·
+env: `ITIS_PFSENSE_HOST=admin@192.168.227.150`, `ITIS_EVE_PATH=/var/log/suricata/suricata_em224404/eve.json`,
+`MSYS_NO_PATHCONV=1` · DB: `data/experiment.db` (log timestamp = UTC)
+
+### แผนที่ของ `recovery_events`
+
+| id | timestamp (UTC) | reason | attempt | result | ประเภท |
+|---|---|---|---|---|---|
+| 1 | 15:59:21.790652 | EVE_STALE | 1 | FAIL | **INCIDENTAL VALIDATION RUN** — ไม่ใช่ผลทดลอง (B0) |
+| 2 | 16:02:03.738799 | PROCESS_DOWN | 1 | SUCCESS | ก่อนแก้ defect — **ใช้เป็นหลักฐาน recovery ไม่ได้** (B2) |
+| 3 | 16:08:24.113851 | PROCESS_DOWN | 1 | SUCCESS | 9B.3 intended (หลังแก้ defect) (B3) |
+| 4 | 16:13:05.327512 | PROCESS_DOWN | 1 | FAIL | 9B.5 intended (B5) |
+| 5 | 16:13:05.629961 | PROCESS_DOWN | 2 | FAIL | 9B.5 intended (B5) |
+| 6 | 16:13:05.814490 | PROCESS_DOWN | 3 | CRITICAL | 9B.5 intended (B5) |
+
+ไม่มีการลบหรือแก้ row ใดใน DB
+
+### B0. INCIDENTAL VALIDATION RUN (15:58:41–15:59:21Z) — ไม่ใช่ผลทดลอง
+
+**[observed]** Git Bash แปลง env `ITIS_EVE_PATH` เป็น `C:/Program Files/Git/var/log/...` -> engine tail ไฟล์ที่ไม่มี:
+```
+15:58:42Z INFO    เริ่มอ่าน EVE จาก admin@192.168.227.150:C:/Program Files/Git/var/log/suricata/suricata_em224404/eve.json
+15:58:42Z DEBUG   health = HEALTHY (stats_age=0.8s)
+15:58:57Z DEBUG   health = HEALTHY (stats_age=16.0s)
+15:59:12Z WARNING health = DEGRADED (EVE_STALE, stats_age=31.1s/30s)
+15:59:12Z WARNING เริ่ม recovery Suricata attempt 1/3 (EVE_STALE)
+15:59:16Z INFO    สั่ง restart Suricata ... (/usr/local/etc/rc.d/suricata.sh restart)
+15:59:21Z WARNING health = DEGRADED (EVE_STALE, stats_age=40.0s/30s)
+15:59:21Z ERROR   recovery attempt 1/3 ล้มเหลว: functional check ยังไม่ผ่าน: EVE_STALE
+15:59:21Z WARNING เริ่ม recovery Suricata attempt 2/3 (EVE_STALE)
+```
+engine ถูกหยุดระหว่าง attempt 2 (row ของ attempt 2 ไม่ถูกเขียน) แต่ restart ถูกสั่งไปแล้ว 2 ครั้ง ->
+Suricata PID ใหม่ 48207 (22:59:26 +07) และ stats กลับมาทุก 10 s · reconcile ตอนเริ่ม engine ปิด block
+ทดสอบเก่า `198.51.100.77` (หมดอายุ 2026-09-21) -> `actions` id 1 UNBLOCK SUCCESS/VERIFIED (FR-10 ปกติ;
+pfSense table ว่างอยู่แล้วหลัง reboot)
+
+**[interpretation]** โดยบังเอิญ run นี้แสดงว่า EVE_STALE path ทำงาน (ไม่มี stats > 30 s -> DEGRADED ->
+recovery) และ HEALTHY ช่วง 30 s แรกนับอายุจากเวลาเริ่ม engine ไม่ได้พิสูจน์ว่ามี stats เข้ามา —
+หลักฐาน stats flow ต้องดูบรรทัด "ได้รับ EVE stats event"
+
+### B1. 9B.1 HEALTHY baseline (16:00:40Z)
+
+**[observed]**
+```
+16:00:40Z INFO    เริ่มอ่าน EVE จาก admin@192.168.227.150:/var/log/suricata/suricata_em224404/eve.json
+16:00:40Z DEBUG   health = HEALTHY (stats_age=0.2s)
+16:00:47Z DEBUG   ได้รับ EVE stats event (uptime=80)
+16:00:55Z DEBUG   health = HEALTHY (stats_age=8.5s)
+16:00:57Z DEBUG   ได้รับ EVE stats event (uptime=90)
+16:01:07Z DEBUG   ได้รับ EVE stats event (uptime=100)
+16:01:10Z DEBUG   health = HEALTHY (stats_age=3.7s)
+16:01:17Z DEBUG   ได้รับ EVE stats event (uptime=110)
+16:01:25Z DEBUG   health = HEALTHY (stats_age=8.9s)
+16:01:41Z DEBUG   health = HEALTHY (stats_age=4.0s)
+```
+ไม่มี recovery attempt · **Result: PASS** (FR-12)
+
+### B2. 9B.2–9B.3 ก่อนแก้ defect — พบว่า recovery SUCCESS ด้วย stats ของ process เก่า
+
+**[observed]** `STOP_AT_UTC=2026-09-23T16:01:53Z` (`suricata.sh stop` exit 0, `pgrep -x suricata` exit 1)
+```
+16:01:54Z DEBUG   ได้รับ EVE stats event (uptime=147)        <- stats สุดท้ายของ process เก่า
+16:01:56Z WARNING health = DEGRADED (PROCESS_DOWN, stats_age=2.1s/30s)
+16:01:56Z WARNING เริ่ม recovery Suricata attempt 1/3 (PROCESS_DOWN)
+16:01:58Z INFO    สั่ง restart Suricata ... (/usr/local/etc/rc.d/suricata.sh restart)
+16:02:03Z DEBUG   health = HEALTHY (stats_age=9.6s)           <- ยังเป็น stats uptime=147
+16:02:03Z INFO    recovery Suricata สำเร็จที่ attempt 1/3
+16:02:08Z DEBUG   ได้รับ EVE stats event (uptime=10)          <- stats แรกของ process ใหม่
+```
+**[interpretation]** functional check (+5 s) ผ่านเพราะ stats ของ process เก่ายังอายุ < 30 s —
+recovery ถูกบันทึก SUCCESS (row 2) ก่อนมีหลักฐานว่า process ใหม่เขียน stats ·
+**Result: DEFECT** -> แก้ใน commit `eeb3aab fix: require new-process stats before recording recovery success`:
+recovery ต้องเห็น stats ที่มาหลังสั่ง restart **และ** `stats.uptime` ≤ เวลาที่ผ่านไปตั้งแต่สั่ง restart (+1 s)
+poll ทุก restart_wait (5 s) เพดาน = freshness (30 s) · health ปกติ (FR-12, 30 s) ไม่เปลี่ยน
+
+### B3. 9B.3 หลังแก้ defect — recovery SUCCESS ด้วย stats ของ process ใหม่
+
+**[observed]** engine เริ่ม 16:07:10Z — HEALTHY ×4, stats uptime 320→350 ·
+`STOP_AT_UTC=2026-09-23T16:08:06Z` (stop exit 0, pgrep exit 1)
+```
+16:08:07Z DEBUG   ได้รับ EVE stats event (uptime=369)        <- stats สุดท้ายของ process เก่า
+16:08:11Z WARNING health = DEGRADED (PROCESS_DOWN, stats_age=3.7s/30s)
+16:08:11Z WARNING เริ่ม recovery Suricata attempt 1/3 (PROCESS_DOWN)
+16:08:13Z INFO    สั่ง restart Suricata ... (/usr/local/etc/rc.d/suricata.sh restart)
+16:08:18Z WARNING health = DEGRADED (NO_NEW_STATS, stats_age=11.1s/30s)   <- เดิมจะนับ SUCCESS ตรงนี้
+16:08:23Z DEBUG   ได้รับ EVE stats event (uptime=10)          <- process ใหม่
+16:08:24Z DEBUG   health = HEALTHY (stats_age=0.2s)
+16:08:24Z INFO    recovery Suricata สำเร็จที่ attempt 1/3
+16:08:33Z DEBUG   ได้รับ EVE stats event (uptime=20)
+```
+pfSense: `pgrep -x suricata` -> 68482 (started 23:08:13 +07) · eve.json stats 23:08:23 / :33 / :43 (+07)
+
+| | Expected | Observed |
+|---|---|---|
+| detection | DEGRADED | DEGRADED (PROCESS_DOWN) 5 s หลัง stop |
+| recovery | restart -> process + new stats -> SUCCESS | attempt 1 SUCCESS หลังได้ stats uptime=10 |
+| audit | `recovery_events` suricata / 1 / SUCCESS / UTC | row 3 |
+
+**Result: PASS** (FR-13)
+
+### B4. 9B.4 audit
+row 3 (ด้านบน) — `service=suricata`, `attempt=1`, `result=SUCCESS`, timestamp UTC (`+00:00`) · **Result: PASS**
+
+### B5. 9B.5 Recovery failure ×3 + CRITICAL latch
+
+failure injection: `restart_command: "/usr/bin/false"` ใน working tree เท่านั้น (ไม่ commit, ไม่แก้ source) ·
+`/usr/bin/false` บน pfSense คืน exit 1
+
+**[observed]** engine เริ่ม 16:12:19Z — HEALTHY ×3, stats uptime 251→281 ·
+`STOP_AT_UTC=2026-09-23T16:13:02Z` (stop exit 0, pgrep exit 1)
+```
+16:13:05Z WARNING  health = DEGRADED (PROCESS_DOWN, stats_age=2.1s/30s)
+16:13:05Z WARNING  เริ่ม recovery Suricata attempt 1/3 (PROCESS_DOWN)
+16:13:05Z ERROR    restart Suricata ไม่สำเร็จที่ admin@192.168.227.150: ** WARNING: connection is not using a post-quantum key exchange algorithm. ...
+16:13:05Z ERROR    recovery attempt 1/3 ล้มเหลว: ** WARNING: connection is not using a post-quantum ...
+16:13:05Z WARNING  เริ่ม recovery Suricata attempt 2/3 (PROCESS_DOWN)
+16:13:05Z ERROR    (เหมือน attempt 1)
+16:13:05Z WARNING  เริ่ม recovery Suricata attempt 3/3 (PROCESS_DOWN)
+16:13:05Z ERROR    restart Suricata ไม่สำเร็จ ...
+16:13:05Z CRITICAL recovery Suricata ล้มครบ 3 ครั้ง (...) — CRITICAL engine ทำงานต่อแต่ IDS อาจไม่ส่ง event แล้ว
+16:13:21Z ERROR    Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+16:13:36Z ERROR    Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — ...
+16:13:51Z ERROR    Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — ...
+16:14:06Z ERROR    Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — ...
+16:14:21Z ERROR    Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — ...
+```
+`grep -c "attempt 4"` บน log ทั้ง run = **0** · CRITICAL ค้าง 5 health cycles (76 s) โดยไม่มี restart ใหม่
+
+| | Expected | Observed |
+|---|---|---|
+| attempts | 3 แล้วหยุด | 3 (rows 4–6) |
+| attempt 4+ | ไม่มี | ไม่มี (0 ครั้งตลอด 5 cycles) |
+| final state | CRITICAL | CRITICAL + log CRITICAL |
+| engine | ทำงานต่อ (ไม่ fail-stop) | health loop ทำงานต่อทุก 15 s |
+
+**Attempt 3 is recorded as CRITICAL by design because it is the final permitted recovery attempt; it
+represents an unsuccessful third attempt and transition to terminal CRITICAL state.** สำหรับ M10:
+recovery attempt failure = attempt ที่ไม่ใช่ SUCCESS (FAIL และ final CRITICAL) · run นี้:
+attempts 3 · successful 0 · failed 3 · final state CRITICAL
+
+**Result: PASS** (FR-13 retry ≤ 3, CRITICAL latch)
+
+**[observed] defect ของ audit ที่พบใน run นี้:** `recovery_events.error` ของ rows 4–6 เป็นข้อความ warning ของ
+ssh ล้วน ๆ — exit code 1 ของ `/usr/bin/false` หายไป (controller ใช้ stderr แทน rc ถ้า stderr ไม่ว่าง
+และ ssh client เขียน post-quantum notice ลง stderr ทุกครั้ง) -> แก้ใน commit
+`4fc42e3 fix: preserve restart exit code in recovery errors`: error = `rc=<n>: <stderr>` (stderr ว่าง -> `rc=<n>`)
+ไม่กรอง warning ทิ้ง · พิสูจน์ด้วย unit test ระดับ controller -> recovery_events
+(`test_ssh_warning_does_not_hide_exit_code`, `test_exit_code_reaches_recovery_events`) ·
+**[decision]** ไม่ rerun 9B.5 — เป็นการแก้การแสดงผล error ใน audit ไม่ใช่ recovery logic ·
+rows 4–6 ใน DB คงข้อความเดิม (บันทึกก่อนแก้)
+
+### B6. 9B.6 Restore + กลับ HEALTHY จาก CRITICAL
+
+**[observed]** คืน `restart_command` -> `git diff -- config/config.yaml` ว่าง ·
+`START_AT_UTC=2026-09-23T16:14:24Z` (`suricata.sh start` exit 0) · `pgrep -x suricata` -> 65422 (23:14:25 +07)
+```
+16:14:21Z ERROR    Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — ...
+16:14:35Z DEBUG    ได้รับ EVE stats event (uptime=10)
+16:14:36Z DEBUG    health = HEALTHY (stats_age=1.6s)
+16:14:36Z WARNING  Suricata กลับมา HEALTHY หลังอยู่ในสถานะ CRITICAL
+16:14:45Z DEBUG    ได้รับ EVE stats event (uptime=20)
+16:14:51Z DEBUG    health = HEALTHY (stats_age=6.7s)
+16:14:55Z / 16:15:05Z / 16:15:15Z / 16:15:25Z  stats uptime 30 / 40 / 50 / 60
+```
+eve.json: 23:14:55 / 23:15:05 / 23:15:15 / 23:15:25 (+07) · ไม่มี recovery attempt ในช่วงนี้ (manual start)
+
+**Result: PASS** — CRITICAL ไม่ค้างถาวร กลับ HEALTHY เมื่อ Suricata functional อีกครั้ง
+
+หลังหยุด engine: `git status` -> untracked `data/` เท่านั้น · `git diff` ว่าง
+
+### B7. ข้อจำกัด (Report — Discussion/Limitations)
+
+- **ไม่มี delay ระหว่าง attempt เมื่อ restart command ล้มทันที:** When the restart command fails
+  immediately, subsequent recovery attempts are currently issued without an inter-attempt delay.
+  Therefore, all three attempts may occur within a very short interval (observed: 0.49 s, rows 4–6).
+  The current FR-13 requirement specifies a maximum of three attempts but does not specify a minimum
+  delay between attempts.
+- **NFR-06 (audit ไม่ทำให้ recovery ล้ม):** ครอบคลุมด้วย unit test (`test_audit_failure_does_not_break_recovery`)
+  ไม่ได้ inject ความล้มเหลวของ DB ใน lab
+- `data/experiment.db-wal` / `-shm` ค้างจากการหยุด engine ด้วย TaskStop (ไม่ได้ checkpoint) — ไม่แตะ ไม่ commit
 
 ## หมายเหตุ: verify_stream_stats.py
 

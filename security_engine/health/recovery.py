@@ -7,7 +7,10 @@ security_engine/health/recovery.py — Suricata recovery (FR-13 / O10 / M10)
 
 หลักที่ล็อก:
 - **command success ≠ functional recovery** — restart คืน rc=0 ยังไม่พอ
-  ต้องตรวจซ้ำว่า process เดินจริง **และ** stats กลับมาสด (HealthMonitor.check())
+  ต้องตรวจซ้ำว่า process เดินจริง **และ** มี stats ของ process ใหม่ (check(since=...))
+  stats ที่ยังสดแต่เป็นของ process เก่า ไม่นับเป็นหลักฐาน recovery
+- ตรวจซ้ำทุก restart_wait_sec จนกว่าจะผ่าน เพดาน = stats_freshness_sec
+  (ช่วงเดียวกับที่ health ปกติยอมให้ไม่มี stats) — เลยเพดาน = attempt นี้ล้ม
 - ทุก attempt เขียนลง recovery_events (§3.4) ไม่ว่าจะ SUCCESS/FAIL/CRITICAL
   -> M10 (Recovery Success Rate) คำนวณจาก DB ได้จริง
 - CRITICAL เป็น "สถานะสุขภาพ + เงื่อนไขแจ้งเตือน" **ไม่ใช่** การหยุด engine
@@ -92,13 +95,13 @@ class RecoveryManager:
             log.warning("เริ่ม recovery Suricata attempt %s/%s (%s)",
                         attempt, self.max_attempts, failure_reason)
 
+            restarted_at = self.monitor.clock()
             restart = self.controller.restart()
             error = None if restart.ok else restart.error
 
             if restart.ok:
-                # command success ≠ functional recovery -> ต้องตรวจซ้ำ
-                self.sleep(self.restart_wait_sec)
-                verified = self.monitor.check()
+                # command success ≠ functional recovery -> ต้องเห็น stats ของ process ใหม่
+                verified = self._await_functional(restarted_at)
                 if verified.healthy:
                     results.append(RESULT_SUCCESS)
                     self._record(attempt, RESULT_SUCCESS, failure_reason)
@@ -125,3 +128,14 @@ class RecoveryManager:
 
         return RecoveryOutcome(state=CRITICAL, attempts=self.max_attempts,
                                results=tuple(results), failure_reason=failure_reason)
+
+    def _await_functional(self, restarted_at):
+        """ตรวจซ้ำทุก restart_wait_sec จนกว่า HEALTHY (รวมเงื่อนไข stats ใหม่)
+        หรือรอครบ stats_freshness_sec -> คืน HealthStatus ตัวสุดท้าย"""
+        waited = 0
+        while True:
+            self.sleep(self.restart_wait_sec)
+            waited += self.restart_wait_sec
+            status = self.monitor.check(since=restarted_at)
+            if status.healthy or waited >= self.monitor.stats_freshness_sec:
+                return status

@@ -24,8 +24,10 @@ health:
   stats_interval_sec: 10          # ความถี่ที่คาดว่า Suricata เขียน stats (ค่าของ lab)
   stats_freshness_multiplier: 3   # FR-12: stats ใหม่ภายใน stats_interval × N (=30s)
   restart_wait_sec: 5             # รอหลัง restart ก่อน functional check (bounded)
-  restart_command: ""             # คำสั่ง restart Suricata บน pfSense — ต้องยืนยันจาก
-                                  # เครื่องจริงก่อนใส่ ว่างไว้ = restart ล้มเหลวเสมอ
+  restart_command: "/usr/local/etc/rc.d/suricata.sh restart"
+                                  # คำสั่ง restart Suricata บน pfSense (รันผ่าน SSH) —
+                                  # ยืนยันกับเครื่องจริงแล้ว 2026-09-23: exit 0 + PID เปลี่ยน
+                                  # + stats กลับมาทุก 10s · ว่างไว้ = restart ล้มเหลวเสมอ
 
 recovery:
   max_attempts: 3                 # FR-13: retry สูงสุด 3 ครั้ง

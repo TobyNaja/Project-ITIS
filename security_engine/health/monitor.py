@@ -15,6 +15,12 @@ state ที่ล็อก: HEALTHY / DEGRADED / CRITICAL
     DEGRADED = อย่างใดอย่างหนึ่งเสีย
     CRITICAL = recovery ล้มครบ max_attempts (RecoveryManager เป็นคนตั้ง)
 
+check(since=t) — ใช้ตอนยืนยัน recovery (FR-13): stats สดอย่างเดียวไม่พอ ต้องเป็น stats
+    ของ process ที่เริ่มหลัง t ด้วย ไม่งั้น stats ที่ process เก่าเขียนไว้ก่อนตาย (ยังอายุ
+    < 30s) จะทำให้ recovery ถูกนับว่าสำเร็จทั้งที่ process ใหม่ยังไม่ได้พิสูจน์ตัวเอง
+    (พบจริงใน lab 2026-09-23: stats_age=9.6s ของ process เก่า -> SUCCESS ก่อน stats ใหม่มา)
+    ตัดสินจาก stats.uptime ของ Suricata: process ใหม่ต้องมี uptime ≤ เวลาที่ผ่านไปตั้งแต่ t
+
 *** ไม่มี loop ในนี้ *** — HealthRunner เป็นคนเรียก check() ตาม check_interval_sec
 """
 import logging
@@ -29,6 +35,10 @@ CRITICAL = "CRITICAL"
 
 REASON_PROCESS_DOWN = "PROCESS_DOWN"    # ตรงกับ recovery_events.failure_reason (§3.4)
 REASON_EVE_STALE = "EVE_STALE"
+REASON_NO_NEW_STATS = "NO_NEW_STATS"   # หลัง restart ยังไม่เห็น stats ของ process ใหม่
+
+# uptime ของ Suricata เป็นวินาทีจำนวนเต็ม — เผื่อการปัดเศษ
+UPTIME_TOLERANCE_SEC = 1.0
 
 
 def _utc_now():
@@ -97,8 +107,20 @@ class HealthMonitor:
     def stats_fresh(self) -> bool:
         return self.stats_age_sec() <= self.stats_freshness_sec
 
+    def new_stats_since(self, since) -> bool:
+        """stats ล่าสุดมาหลัง since **และ** เป็นของ process ที่เริ่มหลัง since
+        ไม่มี uptime ใน event -> พิสูจน์ไม่ได้ -> False (ไม่เดาว่าเป็น process ใหม่)"""
+        if self.last_stats_at is None or self.last_stats_at <= since:
+            return False
+        uptime = ((self.last_stats_event or {}).get("stats") or {}).get("uptime")
+        if isinstance(uptime, bool) or not isinstance(uptime, (int, float)):
+            return False
+        elapsed = (self.last_stats_at - since).total_seconds()
+        return uptime <= elapsed + UPTIME_TOLERANCE_SEC
+
     # ---- ตรวจสุขภาพ ----
-    def check(self) -> HealthStatus:
+    def check(self, since=None) -> HealthStatus:
+        """since=None -> health ปกติ (FR-12) · since=t -> ต้องมี stats ของ process ใหม่ด้วย"""
         process_running = bool(self.controller.is_running())
         age = self.stats_age_sec()
         fresh = age <= self.stats_freshness_sec
@@ -108,6 +130,8 @@ class HealthMonitor:
             reasons.append(REASON_PROCESS_DOWN)
         if not fresh:
             reasons.append(REASON_EVE_STALE)
+        if since is not None and not self.new_stats_since(since):
+            reasons.append(REASON_NO_NEW_STATS)
 
         status = HealthStatus(
             state=HEALTHY if not reasons else DEGRADED,

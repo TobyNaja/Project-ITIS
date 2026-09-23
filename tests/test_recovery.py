@@ -10,6 +10,7 @@ tests/test_recovery.py — STEP 9A: auto recovery ของ Suricata (FR-13 / O1
 5. audit ล้ม ≠ recovery ล้ม (NFR-06)
 """
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -19,6 +20,7 @@ from security_engine.health.monitor import (
     HEALTHY,
     REASON_EVE_STALE,
     REASON_PROCESS_DOWN,
+    HealthMonitor,
     HealthStatus,
 )
 from security_engine.health.recovery import (
@@ -33,6 +35,7 @@ from security_engine.storage.repository import AuditRepository
 
 RESTART_CMD = "/usr/local/etc/rc.d/suricata restart"
 WAIT_SEC = 5
+T_RESTART = datetime(2026, 9, 23, 16, 1, 56, tzinfo=timezone.utc)
 
 DOWN = HealthStatus(state=DEGRADED, reasons=(REASON_PROCESS_DOWN,),
                     process_running=False, stats_age_sec=2.0)
@@ -56,13 +59,23 @@ class FakeController:
 
 
 class FakeMonitor:
-    """check() คืน HealthStatus ตามสคริปต์ (ค่าสุดท้ายใช้ซ้ำ)"""
+    """check() คืน HealthStatus ตามสคริปต์ (ค่าสุดท้ายใช้ซ้ำ)
+
+    stats_freshness_sec = WAIT_SEC -> ตรวจรอบเดียวต่อ attempt (เพดาน polling = 1 รอบ)
+    test ของ polling หลายรอบอยู่ในส่วนที่ 8 (ใช้ HealthMonitor จริง)"""
+
+    stats_freshness_sec = WAIT_SEC
 
     def __init__(self, statuses=None):
         self.statuses = list(statuses or [RECOVERED])
         self.calls = 0
+        self.since = []
 
-    def check(self):
+    def clock(self):
+        return T_RESTART
+
+    def check(self, since=None):
+        self.since.append(since)
         self.calls += 1
         index = min(self.calls - 1, len(self.statuses) - 1)
         return self.statuses[index]
@@ -256,6 +269,142 @@ def test_recovery_events_persisted_for_m10(tmp_path):
         counts = dict(conn.execute(
             "SELECT result, COUNT(*) FROM recovery_events GROUP BY result"))
     assert counts == {RESULT_SUCCESS: 1, RESULT_FAIL: 2, RESULT_CRITICAL: 1}
+
+
+# ---- 8. recovery ต้องเห็น stats ของ process ใหม่ (defect ที่พบใน lab 2026-09-23) ----
+# lab: stop 16:01:53 -> stats สุดท้ายของ process เก่า (uptime=147) 16:01:54 -> restart
+# 16:01:56 -> ตรวจที่ +5s เห็น stats_age=9.6s -> SUCCESS ทั้งที่ stats แรกของ process
+# ใหม่ (uptime=10) เพิ่งมา 16:02:08
+def test_recovery_checks_against_restart_time():
+    monitor = FakeMonitor()
+    manager, _ = build(monitor=monitor)
+    manager.recover(DOWN)
+    assert monitor.since == [T_RESTART], "functional check ต้องอ้างเวลาที่สั่ง restart"
+
+
+class LabClock:
+    def __init__(self, start):
+        self.now = start
+
+    def __call__(self):
+        return self.now
+
+
+class RunningController:
+    """process กลับมาหลัง restart เสมอ — ส่วนที่ทดสอบคือเงื่อนไข stats"""
+
+    def __init__(self):
+        self.restarts = 0
+
+    def is_running(self):
+        return True
+
+    def restart(self):
+        self.restarts += 1
+        return RestartResult(ok=True, command=RESTART_CMD, returncode=0)
+
+
+def stats(uptime):
+    return {"event_type": "stats", "stats": {"uptime": uptime}}
+
+
+def lab_recovery(schedule, max_attempts=3):
+    """schedule = [(วินาทีหลัง restart ครั้งแรก, uptime)] — stats ที่มาถึงระหว่างรอ
+    stats ของ process เก่า (uptime=147) มาถึงก่อน restart 2 วินาที"""
+    clock = LabClock(T_RESTART - timedelta(seconds=2))
+    controller = RunningController()
+    monitor = HealthMonitor(controller, stats_interval_sec=10,
+                            stats_freshness_multiplier=3, clock=clock)
+    monitor.on_stats(stats(147))
+    clock.now = T_RESTART
+    pending = sorted(schedule)
+
+    def sleep(seconds):
+        target = clock.now + timedelta(seconds=seconds)
+        while pending and T_RESTART + timedelta(seconds=pending[0][0]) <= target:
+            offset, uptime = pending.pop(0)
+            clock.now = T_RESTART + timedelta(seconds=offset)
+            monitor.on_stats(stats(uptime))
+        clock.now = target
+
+    manager = RecoveryManager(controller, monitor, max_attempts=max_attempts,
+                              restart_wait_sec=WAIT_SEC, sleep=sleep)
+    return manager, controller
+
+
+def test_old_process_stats_do_not_count_as_recovery():
+    """stats ของ process เก่ายังสด (<30s) แต่ไม่มี stats ใหม่ -> ห้าม SUCCESS"""
+    manager, controller = lab_recovery(schedule=[], max_attempts=1)
+    outcome = manager.recover(DOWN)
+    assert outcome.state == CRITICAL
+    assert outcome.results == (RESULT_CRITICAL,)
+    assert controller.restarts == 1
+
+
+def test_recovery_waits_for_first_stats_of_new_process():
+    """lab จริง: stats แรกของ process ใหม่มาที่ +12s (uptime=10) -> SUCCESS attempt 1"""
+    manager, controller = lab_recovery(schedule=[(12, 10)])
+    outcome = manager.recover(DOWN)
+    assert outcome.state == HEALTHY
+    assert outcome.results == (RESULT_SUCCESS,)
+    assert controller.restarts == 1, "รอ stats ใหม่ ไม่ใช่ restart ซ้ำ"
+
+
+def test_shutdown_flush_after_restart_is_not_new_stats():
+    """restart ที่หยุด process เก่าเอง -> stats flush (uptime สูง) มาหลังสั่ง restart
+    ต้องไม่ถูกนับเป็นของ process ใหม่"""
+    manager, _ = lab_recovery(schedule=[(1, 147)], max_attempts=1)
+    assert manager.recover(STALE).state == CRITICAL
+
+    manager, _ = lab_recovery(schedule=[(1, 147), (11, 10)])
+    assert manager.recover(STALE).results == (RESULT_SUCCESS,)
+
+
+def test_no_new_stats_within_freshness_window_fails_attempt(tmp_path):
+    """เพดานรอ = stats_freshness_sec (30s) -> เลยแล้วยังไม่มี stats ใหม่ = attempt ล้ม"""
+    repo = AuditRepository(str(tmp_path / "r.db"))
+    manager, _ = lab_recovery(schedule=[(31, 30)], max_attempts=1)
+    manager.repository = repo
+    outcome = manager.recover(DOWN)
+    assert outcome.state == CRITICAL
+    rows = repo.get_recovery_events(service=SERVICE_SURICATA)
+    assert "NO_NEW_STATS" in rows[0]["error"]
+
+
+def test_polls_every_restart_wait_until_new_stats():
+    waits = []
+    manager, _ = lab_recovery(schedule=[(12, 10)])
+    inner = manager.sleep
+    manager.sleep = lambda s: (waits.append(s), inner(s))
+    manager.recover(DOWN)
+    assert waits == [WAIT_SEC, WAIT_SEC, WAIT_SEC], "5s -> 10s -> 15s (stats ใหม่มาที่ 12s)"
+
+
+def test_stats_without_uptime_cannot_prove_new_process():
+    clock = LabClock(T_RESTART)
+    monitor = HealthMonitor(RunningController(), 10, 3, clock=clock)
+    clock.now = T_RESTART + timedelta(seconds=10)
+    monitor.on_stats({"event_type": "stats", "stats": {}})
+    assert monitor.new_stats_since(T_RESTART) is False
+
+
+def test_normal_health_check_is_unchanged():
+    """FR-12 ปกติ (ไม่มี since): stats สด < 30s = HEALTHY เหมือนเดิม"""
+    clock = LabClock(T_RESTART)
+    monitor = HealthMonitor(RunningController(), 10, 3, clock=clock)
+    monitor.on_stats(stats(147))
+    clock.now = T_RESTART + timedelta(seconds=9.6)
+    assert monitor.check().state == HEALTHY
+    # stats เดียวกันใช้ยืนยัน recovery ไม่ได้: process uptime 147s ไม่ได้เริ่มหลัง restart
+    assert monitor.check(since=T_RESTART - timedelta(seconds=1)).state == DEGRADED
+
+
+def test_new_process_stats_pass_recovery_check():
+    clock = LabClock(T_RESTART + timedelta(seconds=12))
+    monitor = HealthMonitor(RunningController(), 10, 3, clock=clock)
+    monitor.on_stats(stats(10))
+    status = monitor.check(since=T_RESTART)
+    assert status.state == HEALTHY
 
 
 if __name__ == "__main__":

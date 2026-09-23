@@ -31,7 +31,7 @@ from security_engine.ingestion.eve_reader import stream_events
 from security_engine.correlation.engine import CorrelationEngine
 from security_engine.policy.rule_engine import RuleEngine
 from security_engine.policy.rules_config import load_rules
-from security_engine.policy.allowlist import load_allowlist
+from security_engine.policy.source_context import load_source_context
 from security_engine.enforcement.pfsense_enforcer import PFSenseEnforcer
 from security_engine.lifecycle.block_store import BlockStore
 from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
@@ -47,7 +47,9 @@ log = logging.getLogger(__name__)
 
 # ---- fallback default ของ build_pipeline (ค่าจริงตอนรันมาจาก config.yaml) ----
 # policy config: กฎมาจาก rules.yaml, allowlist มาจาก allowlist.yaml (NFR-01)
+# asset list (factor C) มาจาก assets.yaml — STEP 2B
 ALLOWLIST_PATH = "config/allowlist.yaml"
+ASSETS_PATH = "config/assets.yaml"
 RULES_PATH = "config/rules.yaml"
 DB_PATH = "data/security_engine.db"
 MIN_EVENTS = 5
@@ -60,7 +62,7 @@ EXPIRE_INTERVAL_SEC = 1.0
 
 
 def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
-                   rules_path=RULES_PATH,
+                   assets_path=ASSETS_PATH, rules_path=RULES_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
                    window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
                    enforcer=None, correlator=None, repository=None):
@@ -74,7 +76,8 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
     repository=None -> สร้าง AuditRepository บน db_path เดียวกับ BlockStore
     (audit chain §3.4 ต้องอยู่ไฟล์เดียวกับ active_blocks ถึงจะ join ได้)
     """
-    allowlist = load_allowlist(allowlist_path)
+    # allowlist ชุดเดียวกันไปทั้ง RuleEngine (RULE-003) และ resolver (factor C=0)
+    allowlist, source_context_resolver = load_source_context(allowlist_path, assets_path)
     rules = load_rules(rules_path)
 
     # window_max ส่งเป็น float ตรงๆ — timedelta(seconds=...) รองรับ float
@@ -96,6 +99,7 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
     pipeline = SecurityPipeline(correlator, rule_engine, lifecycle,
                                 lock=shared_lock,
                                 min_events=min_events, window_max=window_max,
+                                source_context_resolver=source_context_resolver,
                                 repository=repository)
     runner = LifecycleRunner(
         lifecycle, shared_lock, interval=expire_interval,

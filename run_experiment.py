@@ -13,6 +13,11 @@ Scenarios — decision มาจาก rules.yaml (raw Suricata severity ไม�
   T3  severity 2 (MEDIUM) × 5 ใน ≤10s   -> ALERT          (RULE-002)
   T4  severity 1 (HIGH) × 5 ใน ≤10s     -> BLOCK          (RULE-001)
   T5  allowlisted + severity 1 × 5      -> NO_AUTO_BLOCK  (RULE-003 priority 1)
+      source = IP จาก config/allowlist.yaml (prerequisite P6) — ไม่ hardcode ในไฟล์นี้
+      allowlist ว่าง -> T5 รันไม่ได้ (raise ก่อนเริ่ม trial แรก)
+
+Source context (STEP 2B): allowlist.yaml + assets.yaml -> load_source_context()
+allowlist ชุดเดียวกันไปทั้ง RuleEngine (RULE-003) และ resolver (factor C=0)
 
 *** ป้าย A1–A4 ปลดระวางแล้ว (STEP 10) *** mapping ของ trace เก่า:
 A1→T10 · A2→T3 · A3→T4 · A4→T5 — หลักฐาน Phase 12 ที่เขียนก่อน freeze ยังใช้
@@ -54,6 +59,9 @@ import time
 from security_engine.correlation.engine import CorrelationEngine
 from security_engine.policy.rule_engine import RuleEngine
 from security_engine.policy.rules_config import load_rules
+from security_engine.policy.allowlist import DEFAULT_ALLOWLIST_PATH
+from security_engine.policy.assets import DEFAULT_ASSETS_PATH
+from security_engine.policy.source_context import load_source_context
 from security_engine.enforcement.pfsense_enforcer import PFSenseEnforcer, EnforcementError
 from security_engine.lifecycle.block_store import BlockStore
 from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
@@ -63,7 +71,6 @@ from security_engine.settings import ENV_PFSENSE_HOST, require_env
 from security_engine.storage.repository import AuditPersistenceError, AuditRepository
 
 TEST_SRC = "198.51.100.77"   # TEST-NET (ไม่ใช่ Kali) สำหรับ enforcement mode
-ALLOWLISTED_SRC = "203.0.113.9"
 
 MIN_EVENTS = 5
 WINDOW_MAX = 10.0
@@ -102,7 +109,16 @@ def _events_now(src, dest_ips, severity):
 # ---- scenario T3/T4/T5/T10 (synthetic) ----
 # แต่ละอันคืน (events_to_feed, expected_decision) — ป้อนทีละ event เข้า pipeline
 # expected = ความคาดหมายจาก docs/test_plan.md ไม่ใช่ผลที่วัดได้
-def scenario_events(test_id):
+def allowlisted_source(allowlist):
+    """source ของ T5 = IP ที่ผู้ทดลองใส่ใน allowlist.yaml ตาม P6
+    ว่าง -> ValueError (T5 ไม่มีความหมายถ้าไม่มี source ที่ถูก allowlist)"""
+    if not allowlist:
+        raise ValueError("T5 ต้องตั้ง prerequisite P6 ก่อน: ใส่ IP ใน "
+                         "config/allowlist.yaml (allowlist ว่างอยู่)")
+    return sorted(allowlist)[0]
+
+
+def scenario_events(test_id, allowlist=frozenset()):
     test_id = LEGACY_LABELS.get(test_id, test_id)       # รับป้ายเก่าได้ แต่แปลงทันที
     if test_id == "T10":    # 4 HIGH < min_events(5) -> correlation ไม่ match
         return _events_now(TEST_SRC, ["w", "x", "y", "z"], 1), None
@@ -111,7 +127,7 @@ def scenario_events(test_id):
     if test_id == "T4":     # HIGH -> BLOCK (RULE-001: severity 1 = HIGH)
         return _events_now(TEST_SRC, ["x"] * 5, 1), "BLOCK"
     if test_id == "T5":     # allowlisted -> NO_AUTO_BLOCK (RULE-003 มาก่อน)
-        return _events_now(ALLOWLISTED_SRC, ["x"] * 5, 1), "NO_AUTO_BLOCK"
+        return _events_now(allowlisted_source(allowlist), ["x"] * 5, 1), "NO_AUTO_BLOCK"
     raise ValueError(test_id)
 
 
@@ -142,15 +158,19 @@ def record_timestamps(repository, test_id, trial_no, trace):
         return None
 
 
-def build(mode, host, db_path):
+def build(mode, host, db_path, context=None):
+    """context = (allowlist, resolver) จาก load_source_context()
+    None -> อ่านจาก config/allowlist.yaml + config/assets.yaml"""
+    allowlist, resolver = context or load_source_context()
     correlator = CorrelationEngine(window_seconds=WINDOW_MAX, min_events=MIN_EVENTS)
-    rule = RuleEngine(load_rules(), allowlist={ALLOWLISTED_SRC})
+    rule = RuleEngine(load_rules(), allowlist=allowlist)
     enforcer = FakeEnforcer() if mode == "logic" else PFSenseEnforcer(host)
     store = BlockStore(db_path)
     lifecycle = BlockLifecycleManager(enforcer, store)
     lock = threading.Lock()
     pipeline = SecurityPipeline(correlator, rule, lifecycle, lock=lock,
-                                min_events=MIN_EVENTS, window_max=WINDOW_MAX)
+                                min_events=MIN_EVENTS, window_max=WINDOW_MAX,
+                                source_context_resolver=resolver)
     return pipeline, enforcer, lifecycle
 
 
@@ -164,19 +184,20 @@ def _feed(pipeline, events):
     return last_trace
 
 
-def run_trial(mode, host, db_path, scenario_id, retries):
+def run_trial(mode, host, db_path, scenario_id, retries, context=None):
     """รัน 1 trial พร้อม retry เฉพาะ EnforcementError
     คืน (trace, expected) โดย trace มี trial_status/enforcement_ok/retry_count/error เสมอ
 
     - SUCCESS: trace จริงจาก pipeline (มี latency) + retry_count เท่าที่ retry ไป
     - FAILED : trace สังเคราะห์ (ไม่มี latency fields) เพราะ pipeline throw ก่อน emit
                -> analyzer จะ exclude เอง แต่ report เห็น infra failure"""
-    events, expected = scenario_events(scenario_id)
+    context = context or load_source_context()
+    events, expected = scenario_events(scenario_id, context[0])
     last_err = None
 
     for attempt in range(retries + 1):          # attempt 0 = ครั้งแรก, +retries = retry
         # correlator ใหม่ทุก attempt เพื่อไม่ให้ event ค้างข้าม attempt/trial
-        pipeline, enforcer, lifecycle = build(mode, host, db_path)
+        pipeline, enforcer, lifecycle = build(mode, host, db_path, context)
         try:
             trace = _feed(pipeline, events)
             trace["input_mode"] = "synthetic"
@@ -221,7 +242,13 @@ def run_trial(mode, host, db_path, scenario_id, retries):
 
 
 def run(mode, out_path, trials, host, db_path, block_duration, retries,
-        test_ids=None, repository=None):
+        test_ids=None, repository=None,
+        allowlist_path=DEFAULT_ALLOWLIST_PATH, assets_path=DEFAULT_ASSETS_PATH):
+    # อ่าน config ครั้งเดียว + เช็ก P6 ก่อนเขียน trace/DB ใด ๆ (ไม่ล้มกลางรัน)
+    context = load_source_context(allowlist_path, assets_path)
+    scenarios = test_ids or SCENARIOS
+    if "T5" in scenarios:
+        allowlisted_source(context[0])
     writer = TraceWriter(out_path, experiment={
         "mode": mode, "input_mode": "synthetic", "block_duration": block_duration,
         "retries": retries,
@@ -230,9 +257,10 @@ def run(mode, out_path, trials, host, db_path, block_duration, retries,
     repository = repository or AuditRepository(db_path)
     results = []
 
-    for scenario_id in (test_ids or SCENARIOS):
+    for scenario_id in scenarios:
         for trial in range(1, trials + 1):
-            trace, expected = run_trial(mode, host, db_path, scenario_id, retries)
+            trace, expected = run_trial(mode, host, db_path, scenario_id, retries,
+                                        context)
             writer.write(trace, scenario_id=scenario_id, trial_no=trial)
             record_timestamps(repository, scenario_id, trial, trace)
 
@@ -272,6 +300,9 @@ def main():
     ap.add_argument("--test-id", action="append", choices=SCENARIOS,
                     help="เลือกเฉพาะบาง test (ระบุซ้ำได้); default = ทั้งหมด")
     ap.add_argument("--db", default="data/experiment.db")
+    ap.add_argument("--allowlist", default=str(DEFAULT_ALLOWLIST_PATH),
+                    help="T5 ต้องมี IP ในไฟล์นี้ (prerequisite P6)")
+    ap.add_argument("--assets", default=str(DEFAULT_ASSETS_PATH))
     ap.add_argument("--block-duration", type=int, default=10,
                     help="experiment-only; ไม่กระทบ T0-T5")
     ap.add_argument("--retries", type=int, default=2,
@@ -282,7 +313,8 @@ def main():
     if host is None and args.mode == "enforcement":
         host = require_env(ENV_PFSENSE_HOST)
     run(args.mode, args.out, args.trials, host, args.db,
-        args.block_duration, args.retries, test_ids=args.test_id)
+        args.block_duration, args.retries, test_ids=args.test_id,
+        allowlist_path=args.allowlist, assets_path=args.assets)
 
 
 if __name__ == "__main__":

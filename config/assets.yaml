@@ -1,0 +1,14 @@
+# config/assets.yaml — Known Lab Assets (Blueprint §3.5 factor C)
+#
+# source IP ที่อยู่ในรายการนี้ (และไม่ได้อยู่ใน allowlist):
+#   - Risk Model: factor C = 30 (Internal Known Asset)
+# source ที่ไม่อยู่ทั้งที่นี่และ allowlist -> C = 80 (Unknown/External)
+#
+# strict: IP ที่สะกดผิด -> AssetsError ทันที (ไม่ข้ามเงียบ)
+#
+# ว่างโดยตั้งใจ (STEP 2B, 2026-09-23): lab ปัจจุบันไม่มี protected asset ที่ยืนยัน
+# role ได้ — 192.168.1.10 / .11 ไม่พบหลักฐานบน pfSense (ARP, DHCP, config.xml)
+# และ Blueprint ไม่ได้ระบุ IP ใด ๆ จึงไม่ใส่จากการเดา
+# ห้ามใส่ 192.168.2.10 (Kali / attacker) — เป็น unknown source (C=80) ของการทดลอง
+
+assets: []

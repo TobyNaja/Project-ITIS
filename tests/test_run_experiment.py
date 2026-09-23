@@ -19,6 +19,18 @@ import run_experiment as rx
 from security_engine.enforcement.pfsense_enforcer import EnforcementError
 
 
+# source ที่ผู้ทดลองใส่ใน allowlist.yaml ตาม P6 (runner ไม่ hardcode — STEP 2B)
+P6_SRC = "192.168.2.10"
+P6_ALLOWLIST = frozenset({P6_SRC})
+
+
+@pytest.fixture
+def p6_allowlist(tmp_path):
+    f = tmp_path / "allowlist.yaml"
+    f.write_text(f'allowlist:\n  - "{P6_SRC}"\n', encoding="utf-8")
+    return str(f)
+
+
 @pytest.fixture(autouse=True)
 def _no_retry_delay(monkeypatch):
     # กัน test ช้าเพราะ retry delay 2 วิจริง
@@ -36,8 +48,8 @@ def test_legacy_labels_still_map_to_test_ids():
     """trace เก่าใช้ A1–A4 — ต้องแปลได้ แต่ไม่ใช่ชื่อหลักอีกต่อไป"""
     assert rx.LEGACY_LABELS == {"A1": "T10", "A2": "T3", "A3": "T4", "A4": "T5"}
     for legacy, canonical in rx.LEGACY_LABELS.items():
-        old_events, old_expected = rx.scenario_events(legacy)
-        new_events, new_expected = rx.scenario_events(canonical)
+        old_events, old_expected = rx.scenario_events(legacy, P6_ALLOWLIST)
+        new_events, new_expected = rx.scenario_events(canonical, P6_ALLOWLIST)
         # timestamp เป็น now() จึงเทียบรูปร่างของ scenario ไม่ใช่ตัวเวลา
         assert old_expected == new_expected
         assert [(e["src_ip"], e["dest_ip"], e["severity"]) for e in old_events] ==                [(e["src_ip"], e["dest_ip"], e["severity"]) for e in new_events]
@@ -65,9 +77,33 @@ def test_t4_critical_block():
 
 
 def test_t5_allowlisted_no_auto_block():
-    events, expected = rx.scenario_events("T5")
+    events, expected = rx.scenario_events("T5", P6_ALLOWLIST)
     assert expected == "NO_AUTO_BLOCK"
-    assert all(e["src_ip"] == rx.ALLOWLISTED_SRC for e in events)
+    assert all(e["src_ip"] == P6_SRC for e in events)
+
+
+def test_t5_source_comes_from_allowlist_not_runner():
+    """STEP 2B: source ของ T5 = IP ใน allowlist.yaml (P6) ไม่ใช่ค่าฝังใน runner"""
+    assert not hasattr(rx, "ALLOWLISTED_SRC")
+    events, _ = rx.scenario_events("T5", frozenset({"10.20.30.40"}))
+    assert {e["src_ip"] for e in events} == {"10.20.30.40"}
+
+
+def test_t5_without_p6_allowlist_raises():
+    with pytest.raises(ValueError, match="P6"):
+        rx.scenario_events("T5")
+
+
+def test_run_t5_with_empty_allowlist_fails_before_writing(tmp_path):
+    """P6 ไม่ได้ตั้ง -> พังก่อนเขียน trace/DB (ไม่ทิ้งผลครึ่งรัน)"""
+    empty = tmp_path / "allowlist.yaml"
+    empty.write_text("allowlist: []\n", encoding="utf-8")
+    out = tmp_path / "t.jsonl"
+    with pytest.raises(ValueError, match="P6"):
+        rx.run("logic", str(out), 1, None, str(tmp_path / "x.db"),
+               block_duration=10, retries=0, allowlist_path=str(empty))
+    assert not out.exists()
+    assert not (tmp_path / "x.db").exists()
 
 
 def test_unknown_scenario_raises():
@@ -76,34 +112,37 @@ def test_unknown_scenario_raises():
 
 
 def test_no_monitor_scenario_by_design():
-    expecteds = {rx.scenario_events(s)[1] for s in rx.SCENARIOS}
+    expecteds = {rx.scenario_events(s, P6_ALLOWLIST)[1] for s in rx.SCENARIOS}
     assert "MONITOR" not in expecteds
 
 
 # ---- 2+3. logic mode end-to-end ----
-def test_logic_mode_all_decisions_match(tmp_path):
+def test_logic_mode_all_decisions_match(tmp_path, p6_allowlist):
     out = tmp_path / "traces_logic.jsonl"
     results = rx.run("logic", str(out), trials=2, host="unused",
-                     db_path=str(tmp_path / "exp.db"), block_duration=10, retries=2)
+                     db_path=str(tmp_path / "exp.db"), block_duration=10, retries=2,
+                     allowlist_path=p6_allowlist)
     mismatches = [r for r in results if not r[6]]
     assert not mismatches, f"decision mismatches: {mismatches}"
     assert len(results) == 8       # 4 scenario x 2 trial
 
 
-def test_logic_mode_traces_tagged_synthetic(tmp_path):
+def test_logic_mode_traces_tagged_synthetic(tmp_path, p6_allowlist):
     out = tmp_path / "traces_logic.jsonl"
     rx.run("logic", str(out), trials=1, host="unused",
-           db_path=str(tmp_path / "exp.db"), block_duration=10, retries=2)
+           db_path=str(tmp_path / "exp.db"), block_duration=10, retries=2,
+           allowlist_path=p6_allowlist)
     lines = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert lines
     assert all(r.get("input_mode") == "synthetic" for r in lines)
 
 
-def test_logic_mode_all_success_status(tmp_path):
+def test_logic_mode_all_success_status(tmp_path, p6_allowlist):
     # logic mode (FakeEnforcer) ไม่มีทาง fail -> ทุก trace SUCCESS retry=0
     out = tmp_path / "traces_logic.jsonl"
     rx.run("logic", str(out), trials=1, host="unused",
-           db_path=str(tmp_path / "exp.db"), block_duration=10, retries=2)
+           db_path=str(tmp_path / "exp.db"), block_duration=10, retries=2,
+           allowlist_path=p6_allowlist)
     lines = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert all(r["trial_status"] == "SUCCESS" for r in lines)
     assert all(r["retry_count"] == 0 for r in lines)
@@ -146,13 +185,15 @@ def _patch_build(monkeypatch, enforcer):
     from security_engine.pipeline import SecurityPipeline
     import threading
 
-    def fake_build(mode, host, db_path):
+    def fake_build(mode, host, db_path, context):
+        allowlist, resolver = context
         corr = CorrelationEngine(window_seconds=rx.WINDOW_MAX, min_events=rx.MIN_EVENTS)
-        rule = RuleEngine(load_rules(), allowlist={rx.ALLOWLISTED_SRC})
+        rule = RuleEngine(load_rules(), allowlist=allowlist)
         store = BlockStore(db_path)
         lifecycle = BlockLifecycleManager(enforcer, store)
         pipe = SecurityPipeline(corr, rule, lifecycle, lock=threading.Lock(),
-                                min_events=rx.MIN_EVENTS, window_max=rx.WINDOW_MAX)
+                                min_events=rx.MIN_EVENTS, window_max=rx.WINDOW_MAX,
+                                source_context_resolver=resolver)
         return pipe, enforcer, lifecycle
 
     monkeypatch.setattr(rx, "build", fake_build)

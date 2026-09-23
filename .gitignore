@@ -25,6 +25,8 @@ eve.json
 *.jsonl
 !docs/evidence/**/*.jsonl
 data/*.db
+data/*.db-wal
+data/*.db-shm
 
 # OS / editors
 .DS_Store

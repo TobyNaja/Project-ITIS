@@ -16,13 +16,42 @@
 
 | # | เงื่อนไข | เหตุผล |
 |---|---|---|
-| P1 | pfSense/Suricata และ SEC01 **synchronize clocks ด้วย UTC/NTP** ก่อนวัด latency | `t_event` มาจากนาฬิกา Suricata ส่วน `t_detection` มาจากนาฬิกา SEC01 — M1 คร่อมสอง clock domain ถ้านาฬิกาเหลื่อมกัน ค่า M1 จะผิดโดยไม่มีสัญญาณเตือน (Blueprint §14.1 M1 ระบุข้อจำกัดนี้ไว้เอง) |
-| P2 | บันทึกค่า offset ของนาฬิกาทั้งสองเครื่องก่อน/หลังชุดการทดลอง | ใช้ประกอบการตีความ M1 ในรายงาน |
+| P1 | พยายาม sync นาฬิกา SEC01 ก่อนเริ่มแต่ละชุดการทดลองตาม §1.1 | `t_event` มาจากนาฬิกา Suricata ส่วน `t_detection` มาจากนาฬิกา SEC01 — M1 คร่อมสอง clock domain (Blueprint §14.1 M1 ระบุข้อจำกัดนี้ไว้เอง) |
+| P2 | วัดและบันทึก clock offset SEC01 ↔ pfSense ก่อน/หลังชุดการทดลองตาม §1.1 | ใช้ประกอบการตีความ M1/M4 ในรายงาน |
 | P3 | `ITIS_PFSENSE_HOST`, `ITIS_EVE_PATH` ตั้งค่าครบ | `run_phase4.py` fail-fast ถ้าไม่ครบ (NFR-07) |
 | P4 | `config/config.yaml` ตรงกับค่าที่จะรายงาน (`window_sec=10`, `min_events=5`, `block.duration_sec=300`, `weight_set=A`) | ค่าเหล่านี้ถูกอ้างในผลทุกตาราง |
-| P5 | `health.restart_command` ถูกตั้งเป็นคำสั่ง restart ของ pfSense ที่ **ยืนยันจากเครื่องจริง** แล้ว | ถ้าเว้นว่าง `restart()` จะล้มเหลวเสมอ — T8 จะไม่มีทางผ่าน |
-| P6 | `config/allowlist.yaml` มี `203.0.113.9` | จำเป็นสำหรับ T5 |
-| P7 | DB ของการทดลองเป็นไฟล์แยกจากหลักฐาน Phase 12 | `data/experiment.db` เดิมเป็นหลักฐาน pre-freeze ห้ามเขียนทับ |
+| P5 | `health.restart_command` = `/usr/local/etc/rc.d/suricata.sh restart` (ยืนยันจากเครื่องจริง 2026-09-23) | ถ้าเว้นว่าง `restart()` จะล้มเหลวเสมอ — T8 จะไม่มีทางผ่าน |
+| P6 | **เฉพาะช่วง T5:** เพิ่ม `192.168.2.10` (Kali) ใน `config/allowlist.yaml` ชั่วคราว แล้ว **ลบออกหลังจบ T5** และตรวจ `git diff` ว่าไม่มี IP ทดลองค้าง | T5 ใช้ allowlist.yaml เป็น source of truth (STEP 2B) — runner/generator ไม่ hardcode IP |
+| P7 | `system.db_path` = `data/step11_experiment.db` (เริ่มว่าง) | แยก experimental data ออกจาก `data/experiment.db` ที่เป็นหลักฐาน pre-freeze + lab validation ของ STEP 9 — ห้ามเขียนทับ ห้าม copy ข้อมูลข้าม |
+| P8 | ถ้าแก้ configuration ของ Suricata (GUI หรือไฟล์) ต้อง restart Suricata และตรวจว่า PID เปลี่ยน ก่อนถือว่า configuration ใหม่มีผล | GUI Save ของ pfSense ไม่ restart process — config บนดิสก์ถูกแต่พฤติกรรมยังเป็นของเก่า (พบซ้ำใน lab) |
+
+### 1.1 Clock protocol (ทุกชุดการทดลอง)
+
+```
+ก่อนชุด   1. Admin CMD: w32tm /resync
+          2. w32tm /query /status          -> บันทึกผล sync (สำเร็จ/ล้มเหลว + Last Successful Sync Time)
+          3. w32tm /stripchart /computer:192.168.227.150 /samples:5 /dataonly
+             -> บันทึก offset_before_ms (min/max/mean), เวลาเริ่มชุด, test IDs ในชุด
+ทดลอง
+หลังชุด   4. stripchart 5 samples อีกครั้ง -> บันทึก offset_after_ms (min/max/mean)
+```
+
+- ค่าบวกของ stripchart = SEC01 ช้ากว่า pfSense
+- `w32tm /resync` ล้มเหลว -> **ไม่ troubleshoot เพิ่ม** บันทึกเป็น observation/limitation แล้วทดลองต่อ
+- ไม่ tune NTP เพิ่ม · **ไม่ชดเชย offset ใน code และไม่หัก offset ออกจาก latency อัตโนมัติ**
+- M1/M4 ใช้ **cross-host timestamps** (`t_event` จาก pfSense, `t_detection` / `t_block_verified`
+  จาก SEC01) จึงมี sensitivity ต่อ clock offset — offset เป็น potential systematic error
+  ที่ต้องตีความร่วมกับทิศทางและการเปลี่ยนแปลงของ offset ในชุดนั้น ไม่ใช่ความคลาดเคลื่อนตายตัวของทุกค่า
+- M2/M3 ใช้ **same-host timestamps** (engine process เดียวบน SEC01) ไม่ได้รับผลจาก offset ระหว่างเครื่อง
+- baseline ก่อน freeze (2026-09-23 23:38:55–23:39:03 +07): offset +81.47 … +81.65 ms (mean +81.52 ms)
+  หลังคืน `MaxAllowedPhaseOffset = 1` · drift ที่สังเกตได้ ≈ 1.1 ms/นาที
+
+### 1.2 Freeze rule (ตั้งแต่เริ่ม T1)
+
+ห้ามเปลี่ยน: risk weights · rule thresholds · correlation window · block duration ·
+allowlist logic · DB schema · timestamp protocol — เว้นแต่พบ bug ที่ทำให้ระบบไม่ตรง Blueprint จริง
+ซึ่งต้อง **หยุด experiment -> แก้ + test + commit -> บันทึกการแก้ -> เริ่มชุดที่ได้รับผลใหม่**
+ห้ามเอาผลก่อนและหลังแก้มาปนกัน
 
 ### ข้อจำกัดที่ต้องระบุในรายงาน
 
@@ -46,7 +75,7 @@
 ## 3. ขั้นตอนมาตรฐานของหนึ่ง repetition
 
 ```
-1. เตรียม        ตรวจ P1–P7 · เคลียร์ active_blocks ที่ค้าง · จด run_id
+1. เตรียม        ตรวจ P1–P8 · clock protocol §1.1 (ต้นชุด) · เคลียร์ active_blocks ที่ค้าง · จด run_id
 2. สร้าง input   python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n>
 3. ป้อนเข้าระบบ  ให้ Suricata/EVE ส่งเข้า run_phase4.py (หรือ append เข้าไฟล์ EVE ที่ engine ตามอยู่)
 4. สังเกตผล      อ่านจาก logs/engine.log + SQLite ไม่ใช่จากหน้าจอ generator
@@ -87,7 +116,7 @@ decision/enforcement/recovery ทั้งหมดต้องมาจาก e
 - **Metrics:** M1, M2, M3, M4, M5, M6
 
 ### T5 — Allowlisted Critical Pattern
-- **Input:** pattern เดียวกับ T4 แต่ source = `203.0.113.9` (allowlisted)
+- **Input:** pattern เดียวกับ T4 แต่ source = `192.168.2.10` (Kali) ที่ใส่ใน allowlist ชั่วคราวตาม P6
 - **Expected:** risk score **ถูกคำนวณตามปกติ (ไม่ใช่ 0)** → `RULE-003` → `NO_AUTO_BLOCK` + `ALERT` + audit
 - **ตรวจ:** `decisions.allowlisted=1` · ไม่มี BLOCK action · pfSense ไม่มี rule ใหม่
 - **Metrics:** M8

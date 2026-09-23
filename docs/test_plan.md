@@ -39,14 +39,50 @@
 - ค่าบวกของ stripchart = SEC01 ช้ากว่า pfSense
 - `w32tm /resync` ล้มเหลว -> **ไม่ troubleshoot เพิ่ม** บันทึกเป็น observation/limitation แล้วทดลองต่อ
 - ไม่ tune NTP เพิ่ม · **ไม่ชดเชย offset ใน code และไม่หัก offset ออกจาก latency อัตโนมัติ**
-- M1/M4 ใช้ **cross-host timestamps** (`t_event` จาก pfSense, `t_detection` / `t_block_verified`
-  จาก SEC01) จึงมี sensitivity ต่อ clock offset — offset เป็น potential systematic error
-  ที่ต้องตีความร่วมกับทิศทางและการเปลี่ยนแปลงของ offset ในชุดนั้น ไม่ใช่ความคลาดเคลื่อนตายตัวของทุกค่า
-- M2/M3 ใช้ **same-host timestamps** (engine process เดียวบน SEC01) ไม่ได้รับผลจาก offset ระหว่างเครื่อง
+- แหล่งของ `t_event` ขึ้นกับ input mode (§1.2):
+
+  | Mode | `t_event` มาจาก | M1 / M4 |
+  |---|---|---|
+  | **Primary: controlled EVE injection** (T1–T11) | timestamp ที่ generator ใส่ใน event — นาฬิกา SEC01 | **same-host** (SEC01 -> pfSense eve.json -> SSH tail -> SEC01) |
+  | Supplementary: real Kali traffic | timestamp ที่ Suricata เขียน — นาฬิกา pfSense | **cross-host** — offset เป็น potential systematic error |
+
+- ใน primary dataset clock offset เป็น **contextual evidence** ไม่ใช่ correction factor ของ M1/M4
+- M2/M3 ใช้ same-host timestamps (engine process เดียวบน SEC01) ทุก mode
 - baseline ก่อน freeze (2026-09-23 23:38:55–23:39:03 +07): offset +81.47 … +81.65 ms (mean +81.52 ms)
   หลังคืน `MaxAllowedPhaseOffset = 1` · drift ที่สังเกตได้ ≈ 1.1 ms/นาที
 
-### 1.2 Freeze rule (ตั้งแต่เริ่ม T1)
+### 1.2 Input mode (protocol amendment ก่อน STEP 11)
+
+**Primary dataset (T1–T11) = controlled raw EVE injection**
+
+```
+python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --spacing 0   | ssh <ITIS_PFSENSE_HOST> 'cat >> /var/log/suricata/suricata_em224404/eve.json'
+```
+
+- `--spacing 0` บังคับ: event ทั้ง pattern ใช้ timestamp เดียวกัน (default 1.0 s ทำให้ event หลัง ๆ
+  มี `t_event` ล้ำอนาคตเพราะถูก append พร้อมกัน -> M1 ติดลบ / M4 สั้นลง ~4 s)
+  **ข้อจำกัด:** เป็น burst ภายใน window ≤10 s (factor T = 100 ตาม model) ไม่ได้จำลอง event ที่กระจาย
+  ตลอด 10 วินาที
+- M1 = **EVE event ingestion/detection latency** (`t_detection − t_event`, `t_event` = timestamp ใน
+  injected event) — **ไม่ใช่** packet -> Suricata detection latency
+- M4 = **controlled event -> verified enforcement latency** (`t_block_verified − t_event`)
+- **T1 ไม่ inject อะไรเลย** — ใช้ stats จริงของ Suricata (ห้าม inject stats ปลอม เพราะปนกับ health signal
+  ที่ใช้ `stats.uptime`) แล้วตรวจว่าไม่มี decision/action และ health = HEALTHY
+- synthetic runner (`run_experiment.py`, อยู่ที่ root ของ repo) ต้องระบุ
+  `--db data/step11_experiment.db` ทุกครั้ง (default ของ runner ชี้ `data/experiment.db`)
+- **Supplementary validation** (real Kali traffic -> Suricata -> engine) แยกจาก dataset หลัก
+  ใช้ยืนยันว่า pipeline รับ alert ที่ Suricata สร้างจริงได้ — ไม่รวมใน results ของ T1–T11
+
+**DRYRUN-T4 (pre-experiment runtime validation — ไม่ใช่ T4 run)**
+
+1. engine ใช้ `data/step11_experiment.db` · inject T4 (`198.51.100.77`, `--spacing 0`)
+2. ตรวจครบ: ingestion -> correlation -> risk -> RULE-001 -> BLOCK -> pfSense -> VERIFIED + timestamps
+3. ปล่อย engine ทำงานจน block หมดอายุและ UNBLOCK (ไม่ทิ้ง block ค้างบน pfSense)
+4. หยุด engine · `ls -la data/step11_experiment.db*` · checkpoint/close SQLite ให้เรียบร้อย
+5. archive ทั้งชุดเป็น `data/step11_dryrun.db` (ห้าม `rm`) -> `step11_experiment.db` เริ่มว่างสำหรับ T1
+6. ผล DRYRUN-T4 **ไม่เข้า** ชุดผลของ T4 × 5
+
+### 1.3 Freeze rule (ตั้งแต่เริ่ม T1)
 
 ห้ามเปลี่ยน: risk weights · rule thresholds · correlation window · block duration ·
 allowlist logic · DB schema · timestamp protocol — เว้นแต่พบ bug ที่ทำให้ระบบไม่ตรง Blueprint จริง
@@ -76,8 +112,8 @@ allowlist logic · DB schema · timestamp protocol — เว้นแต่พ�
 
 ```
 1. เตรียม        ตรวจ P1–P8 · clock protocol §1.1 (ต้นชุด) · เคลียร์ active_blocks ที่ค้าง · จด run_id
-2. สร้าง input   python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n>
-3. ป้อนเข้าระบบ  ให้ Suricata/EVE ส่งเข้า run_phase4.py (หรือ append เข้าไฟล์ EVE ที่ engine ตามอยู่)
+2. สร้าง input   python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --spacing 0
+3. ป้อนเข้าระบบ  append เข้า eve.json บน pfSense ที่ run_phase4.py tail อยู่ (§1.2) · T1 ไม่ inject
 4. สังเกตผล      อ่านจาก logs/engine.log + SQLite ไม่ใช่จากหน้าจอ generator
 5. เก็บหลักฐาน   screenshot/pfctl output -> docs/evidence/<T>/R<nn>/
 6. กรอก CSV      experiments/results_*.csv (37 คอลัมน์ ตาม experiments/README.md)

@@ -18,17 +18,29 @@ usage:
     python scripts/generate_test_events.py --test-id T4
     python scripts/generate_test_events.py --test-id T10 --variant b --run 3
     python scripts/generate_test_events.py --test-id T3 --out /tmp/t3.json
+    python scripts/generate_test_events.py --test-id T5 --allowlist config/allowlist.yaml
     python scripts/generate_test_events.py --list
+
+T5: source = IP ใน config/allowlist.yaml (prerequisite P6) — ไม่ hardcode ในไฟล์นี้
+    allowlist ว่าง -> ValueError (เหมือน run_experiment.py, STEP 2B)
 """
 import argparse
 import json
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:                     # รันเป็นสคริปต์ตรง ๆ ได้
+    sys.path.insert(0, str(ROOT))
+
+from security_engine.policy.allowlist import (    # noqa: E402
+    DEFAULT_ALLOWLIST_PATH, load_allowlist,
+)
 
 # ---- ค่าที่ใช้ทำการทดลอง (TEST-NET-2/3 ตาม RFC 5737 ไม่ชนเครือข่ายจริง) ----
 DEFAULT_SRC = "198.51.100.77"           # TEST-NET-2: source ที่ไม่ได้ allowlist
-ALLOWLISTED_SRC = "203.0.113.9"         # TEST-NET-3: ต้องตรงกับ config/allowlist.yaml
 DEFAULT_DEST = "198.51.100.10"
 
 # Suricata severity ดิบ (1=High, 2=Medium, 3=Low) — ห้ามแปลงเป็น risk level ที่นี่
@@ -44,7 +56,7 @@ SIGNATURES = {
 
 # ช่องไฟระหว่าง event ภายในหน้าต่าง correlation (10s) — 5 events ใช้เวลา ~4s
 DEFAULT_SPACING_SEC = 1.0
-STATS_INTERVAL_SEC = 8                  # ตรงกับ health.stats_interval_sec ใน config
+STATS_INTERVAL_SEC = 10                 # ตรงกับ health.stats_interval_sec ใน config
 
 
 @dataclass(frozen=True)
@@ -55,6 +67,7 @@ class Scenario:
     alerts: int = 0                     # จำนวน alert ที่สร้าง
     severity: int = SEV_HIGH
     src_ip: str = DEFAULT_SRC
+    from_allowlist: bool = False        # source มาจาก allowlist.yaml (P6) ไม่ใช่ src_ip
     stats: int = 0                      # จำนวน stats event (health/FR-02)
     manual_step: str = ""               # สิ่งที่ผู้ทดลองต้องทำเอง (generator ทำแทนไม่ได้)
     variants: tuple = field(default_factory=tuple)
@@ -77,7 +90,7 @@ SCENARIOS = {
                    note="5 HIGH จาก source เดียวภายใน 10 วินาที และไม่ได้ allowlist"),
     "T5": Scenario("T5", "Allowlisted Critical Pattern",
                    "NO_AUTO_BLOCK + ALERT (RULE-003)",
-                   alerts=5, severity=SEV_HIGH, src_ip=ALLOWLISTED_SRC,
+                   alerts=5, severity=SEV_HIGH, from_allowlist=True,
                    note="pattern เดียวกับ T4 แต่ source อยู่ใน allowlist "
                         "— risk score ยังถูกคำนวณตามปกติ ไม่ใช่ 0"),
     "T6": Scenario("T6", "Auto-Unblock", "BLOCK -> 300s -> UNBLOCK -> EXPIRED",
@@ -153,9 +166,19 @@ def stats_event(timestamp, uptime) -> dict:
     }
 
 
+def allowlisted_source(allowlist):
+    """source ของ T5 = IP ที่ผู้ทดลองใส่ใน allowlist ตาม P6"""
+    if not allowlist:
+        raise ValueError("T5 ต้องตั้ง prerequisite P6 ก่อน: ใส่ IP ใน "
+                         "config/allowlist.yaml (allowlist ว่างอยู่)")
+    return sorted(allowlist)[0]
+
+
 def generate(test_id, *, variant=None, src_ip=None, start=None,
-             spacing_sec=DEFAULT_SPACING_SEC):
-    """คืน list ของ EVE event (dict) ตาม scenario — ไม่มีผลการตัดสินใด ๆ ปนมา"""
+             spacing_sec=DEFAULT_SPACING_SEC, allowlist=None):
+    """คืน list ของ EVE event (dict) ตาม scenario — ไม่มีผลการตัดสินใด ๆ ปนมา
+
+    allowlist=None + scenario ที่ต้องใช้ allowlist (T5) -> อ่าน config/allowlist.yaml"""
     if test_id not in SCENARIOS:
         raise ValueError(f"ไม่รู้จัก test_id {test_id!r} "
                          f"(รองรับ {', '.join(SCENARIOS)})")
@@ -165,7 +188,12 @@ def generate(test_id, *, variant=None, src_ip=None, start=None,
                          f"(มี {scenario.variants or 'ไม่มี'})")
 
     start = start or datetime.now(timezone.utc)
-    source = src_ip or scenario.src_ip
+    if src_ip:
+        source = src_ip
+    elif scenario.from_allowlist:
+        source = allowlisted_source(load_allowlist() if allowlist is None else allowlist)
+    else:
+        source = scenario.src_ip
     count = VARIANT_ALERTS.get((test_id, variant), scenario.alerts)
 
     events = []
@@ -200,6 +228,8 @@ def main(argv=None):
                     help="เลข repetition (T1–T10 ต้องทำ 5 ครั้ง) — ใช้เป็น run_id "
                          "ของ results_template.csv เท่านั้น ไม่ได้ลง DB")
     ap.add_argument("--src-ip", help="override source IP")
+    ap.add_argument("--allowlist", default=str(DEFAULT_ALLOWLIST_PATH),
+                    help="T5 ใช้ IP จากไฟล์นี้ (prerequisite P6)")
     ap.add_argument("--out", help="เขียนลงไฟล์ (default: stdout)")
     ap.add_argument("--spacing", type=float, default=DEFAULT_SPACING_SEC,
                     help="ช่องไฟระหว่าง alert (วินาที) — ต้องอยู่ในหน้าต่าง correlation")
@@ -215,8 +245,11 @@ def main(argv=None):
     if not args.test_id:
         ap.error("ต้องระบุ --test-id (หรือใช้ --list)")
 
+    scenario = SCENARIOS.get(args.test_id)
+    allowlist = (load_allowlist(args.allowlist)
+                 if scenario is not None and scenario.from_allowlist else None)
     events = generate(args.test_id, variant=args.variant, src_ip=args.src_ip,
-                      spacing_sec=args.spacing)
+                      spacing_sec=args.spacing, allowlist=allowlist)
     lines = "".join(json.dumps(e) + "\n" for e in events)
 
     if args.out:

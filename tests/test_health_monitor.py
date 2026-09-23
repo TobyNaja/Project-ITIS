@@ -22,9 +22,9 @@ from security_engine.health.monitor import (
     HealthStatus,
 )
 
-STATS_INTERVAL = 8          # config: health.stats_interval_sec
+STATS_INTERVAL = 10         # config: health.stats_interval_sec
 MULTIPLIER = 3              # config: health.stats_freshness_multiplier
-FRESHNESS = STATS_INTERVAL * MULTIPLIER     # 24 วินาที
+FRESHNESS = STATS_INTERVAL * MULTIPLIER     # 30 วินาที
 
 START = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -74,7 +74,7 @@ STATS_EVENT = {"event_type": "stats", "stats": {"uptime": 120}}
 
 # ---- 1. เกณฑ์ความสดมาจาก config ----
 def test_freshness_is_interval_times_multiplier(monitor):
-    assert monitor.stats_freshness_sec == FRESHNESS == 24
+    assert monitor.stats_freshness_sec == FRESHNESS == 30
 
 
 def test_freshness_follows_config_not_hardcoded(controller, clock):
@@ -125,7 +125,7 @@ def test_degraded_when_stats_stale(monitor, clock):
 
 
 def test_stats_exactly_at_threshold_is_still_fresh(monitor, clock):
-    """ขอบเขต: อายุ = 24 วิพอดี ยังถือว่าสด (stale เมื่อ 'เกิน' เกณฑ์)"""
+    """ขอบเขต: อายุ = 30 วิพอดี ยังถือว่าสด (stale เมื่อ 'เกิน' เกณฑ์)"""
     monitor.on_stats(STATS_EVENT)
     clock.advance(FRESHNESS)
     assert monitor.check().state == HEALTHY

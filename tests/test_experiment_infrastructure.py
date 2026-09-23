@@ -40,6 +40,10 @@ TEST_PLAN = ROOT / "docs" / "test_plan.md"
 
 ALL_TESTS = [f"T{n}" for n in range(1, 12)]
 
+# source ที่ผู้ทดลองใส่ใน allowlist.yaml ตาม P6 (generator ไม่ hardcode — STEP 2B)
+P6_SRC = "192.168.2.10"
+P6_ALLOWLIST = frozenset({P6_SRC})
+
 # §14.5 Results Template — 37 คอลัมน์ ตามลำดับที่ Blueprint เขียนไว้
 EXPECTED_COLUMNS = [
     # identity (5)
@@ -77,7 +81,7 @@ def test_no_legacy_a_labels_in_generator():
 @pytest.mark.parametrize("test_id", ALL_TESTS)
 def test_generated_lines_survive_the_real_parser(test_id):
     """ทุก event ต้องผ่าน parse_line ได้ และ alert ต้อง normalize ผ่าน"""
-    for event in gen.generate(test_id):
+    for event in gen.generate(test_id, allowlist=P6_ALLOWLIST):
         line = json.dumps(event)
         parsed = parse_line(line)
         assert parsed is not None
@@ -90,7 +94,7 @@ def test_generator_emits_input_only(test_id):
     """ห้ามมี field ของ "ผลลัพธ์" ปนมาใน EVE event"""
     banned = {"decision", "risk_score", "risk_level", "rule_id", "action",
               "verify_result", "recovery_result", "expected_result", "blocked"}
-    for event in gen.generate(test_id):
+    for event in gen.generate(test_id, allowlist=P6_ALLOWLIST):
         assert not (banned & set(event)), f"{test_id}: generator ห้ามใส่ผลลัพธ์"
         assert event["event_type"] in ("alert", "stats")
 
@@ -121,10 +125,20 @@ def test_t4_is_five_high_from_one_source():
     assert events[0]["src_ip"] == gen.DEFAULT_SRC
 
 
-def test_t5_uses_a_dedicated_allowlist_source():
-    events = gen.generate("T5")
-    assert {e["src_ip"] for e in events} == {gen.ALLOWLISTED_SRC}
-    assert gen.ALLOWLISTED_SRC != gen.DEFAULT_SRC
+def test_t5_source_comes_from_allowlist_not_generator():
+    """STEP 2B: source ของ T5 = IP ใน allowlist.yaml (P6) ไม่ใช่ค่าฝังใน generator"""
+    assert not hasattr(gen, "ALLOWLISTED_SRC")
+    events = gen.generate("T5", allowlist=P6_ALLOWLIST)
+    assert {e["src_ip"] for e in events} == {P6_SRC}
+    assert P6_SRC != gen.DEFAULT_SRC
+
+
+def test_t5_without_p6_allowlist_raises():
+    """repo allowlist ว่างโดย default -> T5 สร้าง input ไม่ได้จนกว่าจะตั้ง P6"""
+    with pytest.raises(ValueError, match="P6"):
+        gen.generate("T5")
+    with pytest.raises(ValueError, match="P6"):
+        gen.generate("T5", allowlist=set())
 
 
 def test_repo_allowlist_stays_empty_by_default():
@@ -223,7 +237,8 @@ def decide(test_id, variant=None, allowlist=None):
 
     allowlist ส่งเข้ามาเหมือนที่ผู้ทดลองตั้งตาม prerequisite P6 (T5 เท่านั้น)
     """
-    raw = [json.dumps(e) for e in gen.generate(test_id, variant=variant)]
+    raw = [json.dumps(e) for e in gen.generate(test_id, variant=variant,
+                                               allowlist=P6_ALLOWLIST)]
     events = list(iter_events(iter(raw)))               # ผ่าน FR-02 classification
     pipeline = SecurityPipeline(
         CorrelationEngine(window_seconds=10.0, min_events=5),
@@ -273,8 +288,8 @@ def test_engine_decides_expected_outcome_for_generated_input(test_id, variant,
 
 def test_t5_needs_the_allowlist_entry_from_prerequisite_p6():
     """pattern เดียวกับ T4 — ต่างกันแค่ allowlist ที่ผู้ทดลองตั้งไว้"""
-    assert decide("T5")["decision"] == "BLOCK"                      # ไม่ได้ตั้ง P6
-    trace = decide("T5", allowlist={gen.ALLOWLISTED_SRC})           # ตั้ง P6 แล้ว
+    assert decide("T5")["decision"] == "BLOCK"                      # engine ไม่มี P6
+    trace = decide("T5", allowlist=P6_ALLOWLIST)                    # ตั้ง P6 แล้ว
     assert trace["decision"] == "NO_AUTO_BLOCK"
 
 

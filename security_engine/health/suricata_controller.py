@@ -97,7 +97,11 @@ class SuricataController:
                                  error="ssh ล้มเหลว/timeout")
 
         if proc.returncode != 0:
-            error = (proc.stderr or "").strip() or f"rc={proc.returncode}"
+            # rc ต้องอยู่หน้าเสมอ — ssh client เขียน warning ลง stderr ทุกครั้ง
+            # (เช่น post-quantum notice) ถ้าใช้ stderr อย่างเดียว exit code จริงจะหาย
+            # จาก recovery_events (พบใน lab 2026-09-23) · stderr เก็บไว้ครบ ไม่กรองทิ้ง
+            stderr = (proc.stderr or "").strip()
+            error = f"rc={proc.returncode}: {stderr}" if stderr else f"rc={proc.returncode}"
             log.error("restart Suricata ไม่สำเร็จที่ %s: %s", self.host, error)
             return RestartResult(ok=False, command=self.restart_command,
                                  returncode=proc.returncode, error=error)

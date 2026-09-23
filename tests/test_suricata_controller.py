@@ -165,7 +165,44 @@ def test_restart_reports_nonzero_return_code(monkeypatch, controller):
 
 def test_restart_without_stderr_still_reports_code(monkeypatch, controller):
     patch_run(monkeypatch, Recorder(FakeProc(2, stderr="")))
-    assert "rc=2" in controller.restart().error
+    assert controller.restart().error == "rc=2"
+
+
+SSH_PQ_WARNING = (
+    "** WARNING: connection is not using a post-quantum key exchange algorithm.\n"
+    "** This session may be vulnerable to \"store now, decrypt later\" attacks.\n"
+    "** The server may need to be upgraded. See https://openssh.com/pq.html\n")
+
+
+def test_ssh_warning_does_not_hide_exit_code(monkeypatch, controller):
+    """lab 2026-09-23: /usr/bin/false (rc=1) ถูกบันทึกเป็น warning ของ ssh ล้วน ๆ
+    -> exit code ต้องขึ้นก่อนเสมอ และ warning ยังอยู่ครบ (ไม่กรองข้อมูลจริงทิ้ง)"""
+    patch_run(monkeypatch, Recorder(FakeProc(1, stderr=SSH_PQ_WARNING)))
+    result = controller.restart()
+    assert result.returncode == 1
+    assert result.error.startswith("rc=1: ")
+    assert "post-quantum" in result.error
+
+
+def test_exit_code_reaches_recovery_events(monkeypatch, controller, tmp_path):
+    """controller -> RecoveryManager -> recovery_events.error ต้องมี rc=1 จริง"""
+    from security_engine.health.monitor import (
+        DEGRADED, REASON_PROCESS_DOWN, HealthStatus)
+    from security_engine.health.recovery import RecoveryManager
+    from security_engine.storage.repository import AuditRepository
+
+    class ClockOnlyMonitor:          # restart ล้ม -> ไม่ถึง functional check
+        def clock(self):
+            return None
+
+    patch_run(monkeypatch, Recorder(FakeProc(1, stderr=SSH_PQ_WARNING)))
+    repo = AuditRepository(str(tmp_path / "r.db"))
+    manager = RecoveryManager(controller, ClockOnlyMonitor(), repository=repo,
+                              max_attempts=1, sleep=lambda s: None)
+    manager.recover(HealthStatus(state=DEGRADED, reasons=(REASON_PROCESS_DOWN,),
+                                 process_running=False))
+    (row,) = repo.get_recovery_events(service="suricata")
+    assert row["error"].startswith("rc=1: ")
 
 
 def test_restart_handles_ssh_timeout(monkeypatch, controller):

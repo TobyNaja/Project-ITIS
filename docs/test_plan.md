@@ -149,8 +149,17 @@ python run_phase4.py --test-id T4 --run-id T4-R03
 
 | ชุด | จำนวนรอบ | หมายเหตุ |
 |---|---|---|
-| T1–T10 | 5 repetitions ต่อ test | `run_id` = `T4-R01` … `T4-R05` (canonical §1.4) |
-| T11 | 3 รอบ (Weight Set A, B, C) | ใช้ pattern เดียวกันทุกรอบ เปลี่ยนแค่ `risk.weight_set` |
+| T1–T9 | 5 repetitions ต่อ test | `run_id` = `T4-R01` … `T4-R05` (canonical §1.4) |
+| T10 | 5 repetitions ต่อ variant (รวม 10) | variant **a** = `T10-R01` … `T10-R05` · variant **b** = `T10-R06` … `T10-R10` |
+| T11 | 3 รอบ (Weight Set A, B, C) | `T11-R01` = Set A · `T11-R02` = Set B · `T11-R03` = Set C — ใช้ pattern เดียวกันทุกรอบ เปลี่ยนแค่ `risk.weight_set` |
+| DRYRUN-T4 | 1 รอบ (§1.2) | `T4-R00` — `R00` สงวนไว้ให้ DRYRUN **ไม่เข้า dataset** |
+
+- run_id ต้อง **unique ต่อ experiment run** — ห้ามมี run_id เดียวกันสองความหมาย
+  (เช่น `T10-R01` ของ variant a และ b)
+- generator ใช้เลขเดียวกัน: `--test-id T10 --variant b --run 6` -> `T10-R06` ·
+  `--test-id T11 --run 2` -> `T11-R02` (Set B)
+- รายละเอียดของ run (variant, `weight_set`) อยู่ในคอลัมน์ `notes` / `weight_set` ของ CSV
+  ไม่ใส่ใน run_id
 
 ---
 
@@ -245,11 +254,13 @@ decision/enforcement/recovery ทั้งหมดต้องมาจาก e
 - **Expected:** ทั้งสอง variant → `MONITOR` · ไม่มี block
 - **ตรวจ:** `active_blocks` ไม่มีแถวใหม่ทั้งสองกรณี
 - **Metrics:** M7
+- **run_id:** a = `T10-R01`…`R05` · b = `T10-R06`…`R10` (§2)
 - **ขอบเขตการตีความ:** T10 พิสูจน์ว่า *severity สูงอย่างเดียว* หรือ *ความถี่ที่ยังไม่ถึง
   threshold* ไม่ทำให้เกิด block เท่านั้น **ไม่ใช่** ข้อพิสูจน์ว่าระบบมี false positive 0%
 
 ### T11 — Sensitivity Analysis
 - **Input:** pattern เดียวกัน (5 × HIGH ภายใน 10 วินาที) รัน 3 รอบด้วย Weight Set A, B, C
+- **run_id:** `T11-R01` = A · `T11-R02` = B · `T11-R03` = C (§2)
 - **บันทึกต่อรอบ:** `severity_score`, `frequency_score`, `temporal_score`,
   `context_score`, `risk_score`, `risk_level`, `decision`, `rule_id`
 - **Expected:** risk score เปลี่ยนตาม weight set · ถ้า decision ยังเหมือนเดิม ให้รายงาน
@@ -288,7 +299,8 @@ docs/evidence/
 ├── T1/R01..R05/
 ├── T2/ ...
 ...
-└── T11/SetA, SetB, SetC/
+├── T10/R01..R10/          (R01–R05 = variant a · R06–R10 = variant b)
+└── T11/R01, R02, R03/     (= Set A, B, C)
 ```
 
 ทุกโฟลเดอร์ควรมี: screenshot ของสิ่งที่ตรวจ, ส่วนของ `logs/engine.log` ที่เกี่ยวข้อง,

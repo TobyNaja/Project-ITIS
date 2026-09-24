@@ -1,13 +1,15 @@
 """
 security_engine/experiment/timestamp_sink.py — FR-15 ใน runtime engine (run_phase4)
 
-    run_phase4 --test-id T4 --run-id 3
-        -> ExperimentTimestampSink(repository, "T4", "3")
+    run_phase4 --test-id T4 --run-id T4-R03
+        -> ExperimentTimestampSink(repository, "T4", "T4-R03")
         -> SecurityPipeline(trace_sink=sink) -> _emit(trace) -> sink(trace)
         -> experiment_timestamps (1 แถวต่อ trace ที่ correlation match)
 
 หลักที่ล็อก (STEP 11 protocol amendment):
 - identity (test_id + run_id) ผูกกับ sink ตลอดอายุ process — ไม่มี state ภายนอกที่แก้ได้
+- run_id มีรูปเดียว (canonical) `<test_id>-R<NN>` เช่น T4-R03 — ค่าเดียวกันทั้ง DB notes
+  และ CSV (generator --run 3 -> --run-id T4-R03) ห้ามมีทั้ง "3" และ "T4-R03" ปนใน DB
 - ค่าเวลา **คัดลอกจาก trace เดียวกับที่ pipeline ใช้ตัดสินใจ** ไม่สร้างเวลาใหม่
   และไม่ประกอบย้อนหลังจากตารางอื่น
 - correlation ไม่ match (เช่น T2/T10) -> ไม่มีแถว: pipeline หยุดก่อนถึง decision stage
@@ -27,7 +29,7 @@ from security_engine.storage.repository import AuditPersistenceError
 log = logging.getLogger(__name__)
 
 VALID_TEST_IDS = tuple(f"T{n}" for n in range(1, 12))   # Blueprint §14.4 canonical
-_RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+_RUN_ID_PATTERN = re.compile(r"(T(?:[1-9]|1[01]))-R(\d{2})")   # ใช้กับ fullmatch
 MODE_INJECTION = "injection"
 
 
@@ -40,10 +42,10 @@ def validate_identity(test_id, run_id):
     if test_id not in VALID_TEST_IDS:
         raise ExperimentIdentityError(
             f"test_id ต้องเป็นหนึ่งใน {', '.join(VALID_TEST_IDS)} ได้ {test_id!r}")
-    run_id = "" if run_id is None else str(run_id)
-    if not _RUN_ID_PATTERN.match(run_id):
+    match = _RUN_ID_PATTERN.fullmatch(run_id) if isinstance(run_id, str) else None
+    if match is None or match.group(1) != test_id:
         raise ExperimentIdentityError(
-            f"run_id ต้องเป็น [A-Za-z0-9_-] ยาว 1–32 ตัว ได้ {run_id!r}")
+            f"run_id ต้องเป็นรูป {test_id}-R<NN> (เช่น {test_id}-R03) ได้ {run_id!r}")
     return test_id, run_id
 
 

@@ -1,7 +1,7 @@
 """
 tests/test_timestamp_sink.py — FR-15 runtime sink: trace -> experiment_timestamps
 
-    SecurityPipeline(trace_sink=ExperimentTimestampSink(repo, "T4", "3"))
+    SecurityPipeline(trace_sink=ExperimentTimestampSink(repo, "T4", "T4-R03"))
         -> _emit(trace) -> sink(trace) -> 1 แถวต่อ trace ที่ correlation match
 
 ขอบเขต (แยกจาก test_experiment_timestamps.py ซึ่งดู trace ของ pipeline):
@@ -16,7 +16,7 @@ D2 block ถูกระงับ          -> trace มี t_block_cmd แต่
                               (t_block_cmd ของ FR-15 = คำสั่งที่ส่งไป pfSense จริง)
 D3a sink บันทึกไม่สำเร็จ    -> engine ไม่ล้ม, log ERROR, ไม่มีแถว, ไม่สร้างเวลาใหม่
 D3b exception ก่อน _emit() -> ไม่มีแถว (limitation ตาม decision 6a — ไม่แก้ pipeline)
-E  identity                -> T1..T11 + run_id [A-Za-z0-9_-]{1,32} เท่านั้น
+E  identity                -> T1..T11 + run_id canonical <test_id>-R<NN> เท่านั้น
 no-match (4a)              -> ไม่มีแถว
 """
 import json
@@ -86,7 +86,7 @@ class FakeEnforcer:
         return ip in self.added
 
 
-def build_stack(tmp_path, *, enforcer=None, allowlist=None, test_id="T4", run_id="3"):
+def build_stack(tmp_path, *, enforcer=None, allowlist=None, test_id="T4", run_id="T4-R03"):
     """pipeline + lifecycle + repository จริง (DB เดียว) + sink — เหมือน run_phase4"""
     db = tmp_path / "itis.db"
     repo = AuditRepository(db)
@@ -149,11 +149,11 @@ def test_block_row_is_in_pipeline_order(tmp_path):
 
 
 def test_row_identity_and_notes(tmp_path):
-    pipe, repo, _ = build_stack(tmp_path, test_id="T4", run_id="3")
+    pipe, repo, _ = build_stack(tmp_path, test_id="T4", run_id="T4-R03")
     feed(pipe)
     row = only_row(repo, "T4")
     assert row["test_id"] == "T4"
-    assert row["notes"] == "run=3; mode=injection; decision=BLOCK; suppressed=0"
+    assert row["notes"] == "run=T4-R03; mode=injection; decision=BLOCK; suppressed=0"
 
 
 def test_sink_returns_row_id(tmp_path):
@@ -246,7 +246,7 @@ def test_suppressed_duplicate_block_has_null_command_in_row(tmp_path):
 def test_suppressed_without_duplicate_also_nulls_command(tmp_path):
     """REMOVE_FAILED ก็ถูกระงับเช่นกัน — sink ดูที่ block_suppressed ไม่ใช่ duplicate_block"""
     repo = AuditRepository(tmp_path / "itis.db")
-    sink = ExperimentTimestampSink(repo, "T6", "1")
+    sink = ExperimentTimestampSink(repo, "T6", "T6-R01")
     ts = T0.isoformat()
     sink({"correlation_matched": True, "decision": "BLOCK", "src_ip": IP,
           "t_event": ts, "t_detection": ts, "t_decision": ts,
@@ -281,7 +281,7 @@ def test_sink_persistence_failure_does_not_crash_engine(tmp_path, monkeypatch, c
 
 def test_sink_returns_none_on_persistence_failure(tmp_path, monkeypatch):
     repo = AuditRepository(tmp_path / "itis.db")
-    sink = ExperimentTimestampSink(repo, "T4", "1")
+    sink = ExperimentTimestampSink(repo, "T4", "T4-R01")
     calls = []
 
     def broken(*args, **kwargs):
@@ -335,54 +335,60 @@ def test_no_correlation_match_writes_no_row(tmp_path):
 
 def test_sink_ignores_unmatched_trace_directly(tmp_path):
     repo = AuditRepository(tmp_path / "itis.db")
-    sink = ExperimentTimestampSink(repo, "T2", "1")
+    sink = ExperimentTimestampSink(repo, "T2", "T2-R01")
     assert sink({"correlation_matched": False, "t_event": T0.isoformat()}) is None
     assert repo.get_experiment_timestamps() == []
 
 
 # ---------- E. identity ----------
-@pytest.mark.parametrize("test_id", ["T1", "T4", "T11"])
-def test_valid_test_ids(test_id):
-    assert validate_identity(test_id, "1") == (test_id, "1")
+# canonical run_id เดียว: <test_id>-R<NN> (generator --run 3 -> T4-R03) ใช้ทั้ง DB และ CSV
+@pytest.mark.parametrize("test_id,run_id", [
+    ("T1", "T1-R01"), ("T4", "T4-R03"), ("T10", "T10-R05"), ("T11", "T11-R03"),
+    ("T4", "T4-R00"),                   # R00 = DRYRUN (ไม่เข้า dataset)
+])
+def test_valid_canonical_identity(test_id, run_id):
+    assert validate_identity(test_id, run_id) == (test_id, run_id)
 
 
 @pytest.mark.parametrize("test_id", ["T0", "T12", "t4", "A1", "", None, "T4 "])
 def test_invalid_test_id_rejected(test_id):
     with pytest.raises(ExperimentIdentityError):
-        validate_identity(test_id, "1")
+        validate_identity(test_id, "T4-R01")
 
 
-@pytest.mark.parametrize("run_id", ["", None, "a b", "../x", "3;DROP", "x" * 33])
-def test_invalid_run_id_rejected(run_id):
+@pytest.mark.parametrize("run_id", [
+    "3", 3, "03", "R03",                # รูปเดิม/ขาด test prefix — ห้ามปนกับ T4-R03 ใน DB
+    "T3-R03", "T1-R03",                 # prefix ไม่ตรงกับ --test-id
+    "T4-R3", "T4-R003", "t4-r03", "T4_R03", "T4-03",
+    "T4-R03 ", " T4-R03", "T4-R03\n",
+    "DRYRUN2", "", None,
+])
+def test_non_canonical_run_id_rejected(run_id):
     with pytest.raises(ExperimentIdentityError):
         validate_identity("T4", run_id)
-
-
-def test_run_id_int_is_normalized_to_str():
-    assert validate_identity("T4", 3) == ("T4", "3")
 
 
 def test_sink_rejects_bad_identity_at_construction(tmp_path):
     repo = AuditRepository(tmp_path / "itis.db")
     with pytest.raises(ExperimentIdentityError):
-        ExperimentTimestampSink(repo, "T99", "1")
+        ExperimentTimestampSink(repo, "T99", "T99-R01")
 
 
 def test_identity_is_fixed_for_sink_lifetime(tmp_path):
     """I1: 1 process = 1 run — ทุกแถวของ sink ตัวเดียวกันมี identity เดียวกัน"""
-    pipe, repo, _ = build_stack(tmp_path, test_id="T3", run_id="5")
+    pipe, repo, _ = build_stack(tmp_path, test_id="T3", run_id="T3-R05")
     feed(pipe, severity=2)
     feed(pipe, severity=2, start=20)
     rows = repo.get_experiment_timestamps()
     assert len(rows) == 2
     assert {r["test_id"] for r in rows} == {"T3"}
-    assert all(r["notes"].startswith("run=5;") for r in rows)
+    assert all(r["notes"].startswith("run=T3-R05;") for r in rows)
 
 
 # ---------- end-to-end: generator -> ingestion -> pipeline -> sink ----------
 def run_generated(tmp_path, test_id, variant=None):
     raw = [json.dumps(e) for e in gen.generate(test_id, variant=variant)]
-    pipe, repo, _ = build_stack(tmp_path, test_id=test_id, run_id="1")
+    pipe, repo, _ = build_stack(tmp_path, test_id=test_id, run_id=f"{test_id}-R01")
     for event in iter_events(iter(raw)):
         pipe.process(event)
     return repo.get_experiment_timestamps(test_id)

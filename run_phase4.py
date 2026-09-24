@@ -185,7 +185,7 @@ def parse_args(argv):
     identity ผูกกับ process ตลอดอายุ -> 1 process ต่อ 1 test run"""
     ap = argparse.ArgumentParser(description="ITIS runtime engine")
     ap.add_argument("--test-id", help="T1..T11 — เปิดการบันทึก FR-15 ของ test run นี้")
-    ap.add_argument("--run-id", help="repetition ของ test run นี้ (เช่น 1..5)")
+    ap.add_argument("--run-id", help="<test-id>-R<NN> เช่น T4-R03 (= generator --run 3)")
     args = ap.parse_args(argv)
     if (args.test_id is None) != (args.run_id is None):
         ap.error("ต้องระบุ --test-id และ --run-id คู่กัน")

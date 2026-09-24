@@ -75,13 +75,14 @@ python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --s
 
 **DRYRUN-T4 (pre-experiment runtime validation — ไม่ใช่ T4 run)**
 
-1. engine ใช้ `data/step11_experiment.db` · เริ่มด้วย `--test-id T4 --run-id DRYRUN2` (§1.4)
+1. engine ใช้ `data/step11_experiment.db` · เริ่มด้วย `--test-id T4 --run-id T4-R00` (§1.4 — `R00` สงวนไว้ให้ DRYRUN)
    · inject T4 (`198.51.100.77`, `--spacing 0`)
    · ผ่านเมื่อ `experiment_timestamps` มี **1 แถว** ครบ 5 จุด และเรียงเวลาถูก
 2. ตรวจครบ: ingestion -> correlation -> risk -> RULE-001 -> BLOCK -> pfSense -> VERIFIED + timestamps
 3. ปล่อย engine ทำงานจน block หมดอายุและ UNBLOCK (ไม่ทิ้ง block ค้างบน pfSense)
 4. หยุด engine · `ls -la data/step11_experiment.db*` · checkpoint/close SQLite ให้เรียบร้อย
-5. archive ทั้งชุดเป็น `data/step11_dryrun.db` (ห้าม `rm`) -> `step11_experiment.db` เริ่มว่างสำหรับ T1
+5. archive ทั้งชุดเป็น `data/step11_dryrun2.db` (รอบ 2 — `step11_dryrun.db` คือรอบ 1 ห้ามเขียนทับ ห้าม `rm`)
+   -> `step11_experiment.db` เริ่มว่างสำหรับ T1
 6. ผล DRYRUN-T4 **ไม่เข้า** ชุดผลของ T4 × 5
 
 ### 1.3 Freeze rule (ตั้งแต่เริ่ม T1)
@@ -94,14 +95,23 @@ allowlist logic · DB schema · timestamp protocol — เว้นแต่พ�
 ### 1.4 Runtime engine ต่อ run (FR-15 `experiment_timestamps`)
 
 ```
-python run_phase4.py --test-id T4 --run-id 3
+python run_phase4.py --test-id T4 --run-id T4-R03
 ```
 
 - **1 process = 1 run** — identity (`test_id` + `run_id`) ผูกกับ `ExperimentTimestampSink`
   ตลอดอายุ process · restart engine ทุก run และรอ log `เริ่มอ่าน EVE จาก ...` ก่อน inject
-- `--test-id` ต้องเป็น `T1`–`T11` · `--run-id` ต้องเป็น `[A-Za-z0-9_-]` ยาว 1–32 ตัว ·
-  ต้องระบุคู่กัน — ผิดรูปแบบ = engine ออกทันที (exit 2) **ก่อน** อ่าน config หรือแตะ pfSense
-- `--run-id` ใช้ค่าเดียวกับ `--run` ของ generator · CSV แปลงเป็นรูป `T4-R03` ตาม §2
+- `--test-id` ต้องเป็น `T1`–`T11` · `--run-id` ต้องเป็นรูป canonical **`<test-id>-R<NN>`** เท่านั้น
+  (prefix ต้องตรงกับ `--test-id`, NN สองหลัก) · ต้องระบุคู่กัน — ผิดรูปแบบ (เช่น `3`, `T3-R03`
+  ภายใต้ `--test-id T4`) = engine ออกทันที (exit 2) **ก่อน** อ่าน config หรือแตะ pfSense
+- run_id มีรูปเดียวทั้ง DB (`notes`) และ CSV — ไม่มีการแปลงภายหลัง:
+
+  ```
+  generator  --run 3
+      ↓
+  runtime    --run-id T4-R03
+      ↓
+  DB notes / CSV run_id = T4-R03
+  ```
 - ไม่ระบุ `--test-id` = production mode -> `trace_sink=None` -> ไม่เขียน `experiment_timestamps`
 - ค่าเวลาทุกจุดคัดลอกจาก trace เดียวกับที่ pipeline ใช้ตัดสินใจ — ไม่สร้างเวลาใหม่
   และไม่ประกอบย้อนหลังจากตารางอื่น (`actions.timestamp` ≠ `t_block_cmd`)
@@ -139,7 +149,7 @@ python run_phase4.py --test-id T4 --run-id 3
 
 | ชุด | จำนวนรอบ | หมายเหตุ |
 |---|---|---|
-| T1–T10 | 5 repetitions ต่อ test | `run_id` = `T4-R01` … `T4-R05` |
+| T1–T10 | 5 repetitions ต่อ test | `run_id` = `T4-R01` … `T4-R05` (canonical §1.4) |
 | T11 | 3 รอบ (Weight Set A, B, C) | ใช้ pattern เดียวกันทุกรอบ เปลี่ยนแค่ `risk.weight_set` |
 
 ---
@@ -148,7 +158,7 @@ python run_phase4.py --test-id T4 --run-id 3
 
 ```
 1. เตรียม        ตรวจ P1–P8 · clock protocol §1.1 (ต้นชุด) · เคลียร์ active_blocks ที่ค้าง · จด run_id
-   เริ่ม engine  python run_phase4.py --test-id <T> --run-id <n> (process ใหม่ทุก run §1.4)
+   เริ่ม engine  python run_phase4.py --test-id <T> --run-id <T>-R<nn> (process ใหม่ทุก run §1.4)
                  -> รอ log "เริ่มอ่าน EVE จาก ..." ก่อน inject
 2. สร้าง input   python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --spacing 0
 3. ป้อนเข้าระบบ  append เข้า eve.json บน pfSense ที่ run_phase4.py tail อยู่ (§1.2) · T1 ไม่ inject

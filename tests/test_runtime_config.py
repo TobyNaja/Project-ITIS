@@ -232,8 +232,8 @@ def test_parse_args_without_identity_is_production_mode():
 
 
 def test_parse_args_with_identity():
-    args = run_phase4.parse_args(["--test-id", "T4", "--run-id", "3"])
-    assert (args.test_id, args.run_id) == ("T4", "3")
+    args = run_phase4.parse_args(["--test-id", "T4", "--run-id", "T4-R03"])
+    assert (args.test_id, args.run_id) == ("T4", "T4-R03")
 
 
 def test_main_without_test_id_has_no_sink(clean_env):
@@ -244,21 +244,23 @@ def test_main_without_test_id_has_no_sink(clean_env):
 
 def test_main_with_test_id_wires_timestamp_sink(clean_env):
     seen = wire_fakes(clean_env)
-    run_phase4.main(["--test-id", "T4", "--run-id", "3"])
+    run_phase4.main(["--test-id", "T4", "--run-id", "T4-R03"])
 
     sink = seen["build"]["trace_sink"]
     assert isinstance(sink, ExperimentTimestampSink)
-    assert (sink.test_id, sink.run_id) == ("T4", "3")
+    assert (sink.test_id, sink.run_id) == ("T4", "T4-R03")
     # FR-15 ลง DB เดียวกับ audit chain (§3.4)
     assert sink.repository == seen["build"]["repository"]
 
 
 @pytest.mark.parametrize("argv", [
-    ["--test-id", "T99", "--run-id", "1"],        # test_id ผิด
-    ["--test-id", "t4", "--run-id", "1"],
+    ["--test-id", "T99", "--run-id", "T99-R01"],  # test_id ผิด
+    ["--test-id", "t4", "--run-id", "T4-R01"],
     ["--test-id", "T4"],                          # ขาด run-id
-    ["--run-id", "1"],                            # ขาด test-id
-    ["--test-id", "T4", "--run-id", "a b"],       # run_id ผิดรูปแบบ
+    ["--run-id", "T4-R01"],                       # ขาด test-id
+    ["--test-id", "T4", "--run-id", "3"],         # ไม่ใช่ canonical (รูปเดิม)
+    ["--test-id", "T4", "--run-id", "T3-R03"],    # prefix ไม่ตรง test-id
+    ["--test-id", "T4", "--run-id", "a b"],
     ["--test-id", "T4", "--run-id", ""],
 ])
 def test_invalid_identity_fails_before_startup(clean_env, argv, capsys):

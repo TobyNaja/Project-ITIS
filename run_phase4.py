@@ -16,7 +16,9 @@ Correlation/Risk/Rule/Lifecycle อยู่ในนี้ (อยู่ใน 
 ไฟล์นี้แยก build_pipeline() ออกจาก main() เพื่อให้ wiring test ประกอบระบบได้
 โดยไม่ต้องรัน loop จริง
 """
+import argparse
 import logging
+import sys
 import threading
 
 from security_engine.logging_config import configure_from_settings
@@ -42,6 +44,11 @@ from security_engine.health.runner import HealthRunner
 from security_engine.health.suricata_controller import SuricataController
 from security_engine.pipeline import SecurityPipeline
 from security_engine.storage.repository import AuditRepository
+from security_engine.experiment.timestamp_sink import (
+    ExperimentIdentityError,
+    ExperimentTimestampSink,
+    validate_identity,
+)
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +72,8 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                    assets_path=ASSETS_PATH, rules_path=RULES_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
                    window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
-                   enforcer=None, correlator=None, repository=None):
+                   enforcer=None, correlator=None, repository=None,
+                   trace_sink=None):
     """
     ประกอบ component ทั้งหมด -> คืน (pipeline, runner, shared_lock)
     เปิดให้ inject enforcer/correlator เพื่อ wiring test (ไม่ต้องต่อ pfSense จริง)
@@ -100,7 +108,7 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                                 lock=shared_lock,
                                 min_events=min_events, window_max=window_max,
                                 source_context_resolver=source_context_resolver,
-                                repository=repository)
+                                repository=repository, trace_sink=trace_sink)
     runner = LifecycleRunner(
         lifecycle, shared_lock, interval=expire_interval,
         # NFR-02: error ใน expire loop ต้องถูก log ไม่ใช่ตายเงียบ
@@ -170,7 +178,27 @@ def run(pipeline, runner, event_source, health_runner=None):
                 health_runner.stop()
 
 
-def main():
+def parse_args(argv):
+    """--test-id / --run-id (FR-15) — ตรวจก่อนอ่าน config หรือแตะ pfSense
+
+    ไม่ระบุทั้งคู่ = production mode (ไม่บันทึก experiment_timestamps)
+    identity ผูกกับ process ตลอดอายุ -> 1 process ต่อ 1 test run"""
+    ap = argparse.ArgumentParser(description="ITIS runtime engine")
+    ap.add_argument("--test-id", help="T1..T11 — เปิดการบันทึก FR-15 ของ test run นี้")
+    ap.add_argument("--run-id", help="repetition ของ test run นี้ (เช่น 1..5)")
+    args = ap.parse_args(argv)
+    if (args.test_id is None) != (args.run_id is None):
+        ap.error("ต้องระบุ --test-id และ --run-id คู่กัน")
+    if args.test_id is not None:
+        try:
+            validate_identity(args.test_id, args.run_id)
+        except ExperimentIdentityError as exc:
+            ap.error(str(exc))
+    return args
+
+
+def main(argv=()):
+    args = parse_args(argv)
     # อ่าน+validate config ให้ครบก่อน -> ค่าหาย/เสียจะพังก่อนแตะ pfSense หรือสร้าง db
     settings = load_settings()
     configure_from_settings(settings)       # NFR-03: log ลง logs/engine.log
@@ -180,12 +208,18 @@ def main():
     eve_path = settings.require_eve_path()  # config.yaml หรือ ITIS_EVE_PATH
     # repository ตัวเดียวกันทั้ง audit chain และ recovery_events (ไฟล์ DB เดียว §3.4)
     repository = AuditRepository(settings.system.db_path)
+    trace_sink = None
+    if args.test_id is not None:
+        trace_sink = ExperimentTimestampSink(repository, args.test_id, args.run_id)
+        log.info("บันทึก FR-15 experiment_timestamps: test_id=%s run=%s",
+                 args.test_id, args.run_id)
     pipeline, runner, _ = build_pipeline(
         host=host,
         db_path=settings.system.db_path,
         min_events=settings.correlation.min_events,
         window_max=float(settings.correlation.window_sec),
         repository=repository,
+        trace_sink=trace_sink,
     )
     monitor, health_runner = build_health(settings, host=host, repository=repository)
     run(pipeline, runner,
@@ -194,4 +228,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

@@ -75,7 +75,9 @@ python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --s
 
 **DRYRUN-T4 (pre-experiment runtime validation — ไม่ใช่ T4 run)**
 
-1. engine ใช้ `data/step11_experiment.db` · inject T4 (`198.51.100.77`, `--spacing 0`)
+1. engine ใช้ `data/step11_experiment.db` · เริ่มด้วย `--test-id T4 --run-id DRYRUN2` (§1.4)
+   · inject T4 (`198.51.100.77`, `--spacing 0`)
+   · ผ่านเมื่อ `experiment_timestamps` มี **1 แถว** ครบ 5 จุด และเรียงเวลาถูก
 2. ตรวจครบ: ingestion -> correlation -> risk -> RULE-001 -> BLOCK -> pfSense -> VERIFIED + timestamps
 3. ปล่อย engine ทำงานจน block หมดอายุและ UNBLOCK (ไม่ทิ้ง block ค้างบน pfSense)
 4. หยุด engine · `ls -la data/step11_experiment.db*` · checkpoint/close SQLite ให้เรียบร้อย
@@ -88,6 +90,40 @@ python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --s
 allowlist logic · DB schema · timestamp protocol — เว้นแต่พบ bug ที่ทำให้ระบบไม่ตรง Blueprint จริง
 ซึ่งต้อง **หยุด experiment -> แก้ + test + commit -> บันทึกการแก้ -> เริ่มชุดที่ได้รับผลใหม่**
 ห้ามเอาผลก่อนและหลังแก้มาปนกัน
+
+### 1.4 Runtime engine ต่อ run (FR-15 `experiment_timestamps`)
+
+```
+python run_phase4.py --test-id T4 --run-id 3
+```
+
+- **1 process = 1 run** — identity (`test_id` + `run_id`) ผูกกับ `ExperimentTimestampSink`
+  ตลอดอายุ process · restart engine ทุก run และรอ log `เริ่มอ่าน EVE จาก ...` ก่อน inject
+- `--test-id` ต้องเป็น `T1`–`T11` · `--run-id` ต้องเป็น `[A-Za-z0-9_-]` ยาว 1–32 ตัว ·
+  ต้องระบุคู่กัน — ผิดรูปแบบ = engine ออกทันที (exit 2) **ก่อน** อ่าน config หรือแตะ pfSense
+- `--run-id` ใช้ค่าเดียวกับ `--run` ของ generator · CSV แปลงเป็นรูป `T4-R03` ตาม §2
+- ไม่ระบุ `--test-id` = production mode -> `trace_sink=None` -> ไม่เขียน `experiment_timestamps`
+- ค่าเวลาทุกจุดคัดลอกจาก trace เดียวกับที่ pipeline ใช้ตัดสินใจ — ไม่สร้างเวลาใหม่
+  และไม่ประกอบย้อนหลังจากตารางอื่น (`actions.timestamp` ≠ `t_block_cmd`)
+- `notes` = `run=<run_id>; mode=injection; decision=<D>; suppressed=<0|1>`
+
+| สถานการณ์ | แถว FR-15 |
+|---|---|
+| BLOCK + verified (T4/T7) | 1 แถว ครบ 5 จุด |
+| ALERT / NO_AUTO_BLOCK / MONITOR ที่ correlation match (T3/T5) | 1 แถว · `t_block_cmd`, `t_block_verified` = NULL |
+| correlation ไม่ match (T2, T10a/b) · T1 ไม่มี alert | **ไม่มีแถว** — ไม่มี decision stage ให้บันทึก (หลักฐานคือ `security_events` และไม่มี `decisions`) |
+| block verify ล้ม | `t_block_cmd` มี · `t_block_verified` = NULL |
+| block ถูกระงับ (duplicate ACTIVE / REMOVE_FAILED) | `t_block_cmd` = **NULL** + `suppressed=1` แม้ trace ภายในจะมี `t_block_cmd` (ตั้งไว้ก่อนเรียก `lifecycle.block()`) — FR-15 หมายถึงคำสั่งที่ส่งไป pfSense จริงเท่านั้น |
+| sink บันทึกลง DB ไม่สำเร็จ | ไม่มีแถว · log ERROR · engine ทำงานต่อ (NFR-06) |
+
+**ข้อจำกัด FR-15 ที่ต้องระบุในรายงาน**
+
+- exception ก่อน `_emit()` (`EnforcementError` จาก `add_block()` หรือ `AuditPersistenceError`
+  จาก `_audit_enforcement()`) -> sink ไม่ถูกเรียก -> **ไม่มีแถว FR-15** ของ trace นั้น
+  (ยอมรับตาม decision 6a — ไม่แก้ `pipeline.py` เพื่อสร้างแถว)
+- `add_block()` ส่งคำสั่งและ verify ในครั้งเดียว -> `t_block_cmd` คือเวลา **ก่อน** เรียก
+  `lifecycle.block()` จึง **แยก command round-trip ออกจาก verification ไม่ได้** —
+  `t_block_verified − t_block_cmd` = ทั้ง command + verification ไม่ใช่ verification อย่างเดียว
 
 ### ข้อจำกัดที่ต้องระบุในรายงาน
 
@@ -112,6 +148,8 @@ allowlist logic · DB schema · timestamp protocol — เว้นแต่พ�
 
 ```
 1. เตรียม        ตรวจ P1–P8 · clock protocol §1.1 (ต้นชุด) · เคลียร์ active_blocks ที่ค้าง · จด run_id
+   เริ่ม engine  python run_phase4.py --test-id <T> --run-id <n> (process ใหม่ทุก run §1.4)
+                 -> รอ log "เริ่มอ่าน EVE จาก ..." ก่อน inject
 2. สร้าง input   python scripts/generate_test_events.py --test-id <T> [--variant x] --run <n> --spacing 0
 3. ป้อนเข้าระบบ  append เข้า eve.json บน pfSense ที่ run_phase4.py tail อยู่ (§1.2) · T1 ไม่ inject
 4. สังเกตผล      อ่านจาก logs/engine.log + SQLite ไม่ใช่จากหน้าจอ generator
@@ -226,8 +264,10 @@ decision/enforcement/recovery ทั้งหมดต้องมาจาก e
 | M9 Auto-Unblock Success | unblocked สำเร็จ / blocks ที่หมดอายุ | `actions` (UNBLOCK), `active_blocks` | T6 |
 | M10 Recovery Success Rate | recovered / injected failures | `recovery_events` | T8, T9 |
 
-M3 แยกย่อยได้เป็น command round-trip (`t_block_cmd − t_decision`) และ
-verification (`t_block_verified − t_block_cmd`) ตาม §14.1
+§14.1 แยก M3 เป็น command round-trip กับ verification แต่ในระบบนี้ `add_block()` ส่งคำสั่ง
+และ verify ในครั้งเดียว จึงแยกสองส่วนนี้ไม่ได้ (§1.4): `t_block_cmd − t_decision` = ช่วงก่อนเรียก `lifecycle.block()`
+(รวมการบันทึก decision ลง DB) ไม่ใช่ command round-trip และ
+`t_block_verified − t_block_cmd` = command round-trip + verification รวมกัน
 
 ---
 

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import run_phase4
+from security_engine.experiment.timestamp_sink import ExperimentTimestampSink
 from security_engine.policy.allowlist import load_allowlist
 
 ROOT = Path(run_phase4.__file__).resolve().parent
@@ -190,6 +191,91 @@ def test_build_pipeline_without_host_or_env_raises(tmp_path, clean_env):
     with pytest.raises(run_phase4.ConfigError):
         run_phase4.build_pipeline(
             db_path=str(tmp_path / "rc.db"), correlator=object())
+
+
+# ---- 7. FR-15: --test-id/--run-id -> ExperimentTimestampSink เข้า pipeline ----
+def wire_fakes(env):
+    """เหมือน test 3 — ประกอบ main() ด้วยของปลอมทั้งหมด คืน dict ที่ main() ส่งต่อ"""
+    env.setenv(run_phase4.ENV_PFSENSE_HOST, HOST)
+    env.setenv(run_phase4.ENV_EVE_PATH, EVE)
+    seen = {}
+
+    def fake_build(**kwargs):
+        seen["build"] = kwargs
+        return "pipeline", "runner", "lock"
+
+    env.setattr(run_phase4, "build_pipeline", fake_build)
+    env.setattr(run_phase4, "AuditRepository", lambda db_path: f"repo:{db_path}")
+    class FakeMonitor:
+        def on_stats(self, event):
+            pass
+
+    env.setattr(run_phase4, "build_health",
+                lambda settings, *, host, repository=None: (FakeMonitor(), None))
+    env.setattr(run_phase4, "stream_events", lambda *a, **k: iter(()))
+    env.setattr(run_phase4, "run", lambda *a, **k: None)
+    return seen
+
+
+def forbid_startup(env):
+    """identity ผิดต้องพังก่อนอ่าน config / ประกอบระบบ / แตะ pfSense"""
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("ต้องพังที่ parse_args ก่อนถึงขั้นนี้")
+
+    env.setattr(run_phase4, "load_settings", must_not_run)
+    env.setattr(run_phase4, "build_pipeline", must_not_run)
+
+
+def test_parse_args_without_identity_is_production_mode():
+    args = run_phase4.parse_args([])
+    assert args.test_id is None and args.run_id is None
+
+
+def test_parse_args_with_identity():
+    args = run_phase4.parse_args(["--test-id", "T4", "--run-id", "3"])
+    assert (args.test_id, args.run_id) == ("T4", "3")
+
+
+def test_main_without_test_id_has_no_sink(clean_env):
+    seen = wire_fakes(clean_env)
+    run_phase4.main([])
+    assert seen["build"]["trace_sink"] is None
+
+
+def test_main_with_test_id_wires_timestamp_sink(clean_env):
+    seen = wire_fakes(clean_env)
+    run_phase4.main(["--test-id", "T4", "--run-id", "3"])
+
+    sink = seen["build"]["trace_sink"]
+    assert isinstance(sink, ExperimentTimestampSink)
+    assert (sink.test_id, sink.run_id) == ("T4", "3")
+    # FR-15 ลง DB เดียวกับ audit chain (§3.4)
+    assert sink.repository == seen["build"]["repository"]
+
+
+@pytest.mark.parametrize("argv", [
+    ["--test-id", "T99", "--run-id", "1"],        # test_id ผิด
+    ["--test-id", "t4", "--run-id", "1"],
+    ["--test-id", "T4"],                          # ขาด run-id
+    ["--run-id", "1"],                            # ขาด test-id
+    ["--test-id", "T4", "--run-id", "a b"],       # run_id ผิดรูปแบบ
+    ["--test-id", "T4", "--run-id", ""],
+])
+def test_invalid_identity_fails_before_startup(clean_env, argv, capsys):
+    forbid_startup(clean_env)
+    with pytest.raises(SystemExit) as exc:
+        run_phase4.main(argv)
+    assert exc.value.code == 2                    # argparse usage error
+    assert "error:" in capsys.readouterr().err
+
+
+def test_build_pipeline_passes_trace_sink_to_pipeline(tmp_path, monkeypatch):
+    monkeypatch.chdir(ROOT)
+    sentinel = object()
+    pipeline, _, _ = run_phase4.build_pipeline(
+        db_path=str(tmp_path / "rc.db"), enforcer=FakeEnforcer(),
+        correlator=object(), trace_sink=sentinel)
+    assert pipeline.trace_sink is sentinel
 
 
 if __name__ == "__main__":

@@ -43,6 +43,7 @@ from security_engine.health.recovery import RecoveryManager
 from security_engine.health.runner import HealthRunner
 from security_engine.health.suricata_controller import SuricataController
 from security_engine.pipeline import SecurityPipeline
+from security_engine.scoring.risk import DEFAULT_WEIGHT_SET
 from security_engine.storage.repository import AuditRepository
 from security_engine.experiment.timestamp_sink import (
     ExperimentIdentityError,
@@ -73,7 +74,7 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
                    window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
                    enforcer=None, correlator=None, repository=None,
-                   trace_sink=None):
+                   trace_sink=None, weight_set=DEFAULT_WEIGHT_SET):
     """
     ประกอบ component ทั้งหมด -> คืน (pipeline, runner, shared_lock)
     เปิดให้ inject enforcer/correlator เพื่อ wiring test (ไม่ต้องต่อ pfSense จริง)
@@ -108,6 +109,7 @@ def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
                                 lock=shared_lock,
                                 min_events=min_events, window_max=window_max,
                                 source_context_resolver=source_context_resolver,
+                                weight_set=weight_set,
                                 repository=repository, trace_sink=trace_sink)
     runner = LifecycleRunner(
         lifecycle, shared_lock, interval=expire_interval,
@@ -220,6 +222,7 @@ def main(argv=()):
         window_max=float(settings.correlation.window_sec),
         repository=repository,
         trace_sink=trace_sink,
+        weight_set=settings.risk.weight_set,   # §3.5 — T11 เปลี่ยน set ผ่าน config
     )
     monitor, health_runner = build_health(settings, host=host, repository=repository)
     run(pipeline, runner,

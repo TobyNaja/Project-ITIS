@@ -231,6 +231,18 @@ def test_build_pipeline_wires_repository_and_lifecycle(tmp_path, monkeypatch):
 
     assert pipeline.repository is not None
     assert runner.lifecycle.repository is pipeline.repository
+    assert pipeline.weight_set == "A"
+
+
+@pytest.mark.parametrize("weight_set", ["B", "C"])
+def test_build_pipeline_passes_weight_set(tmp_path, monkeypatch, weight_set):
+    """risk.weight_set จาก config ต้องถึง pipeline จริง (T11) ไม่ใช่แค่ถูก log"""
+    monkeypatch.chdir(run_phase4.__file__.rsplit("run_phase4.py", 1)[0])
+    pipeline, _, _ = run_phase4.build_pipeline(
+        db_path=str(tmp_path / "wire.db"),
+        enforcer=FakeEnforcer(), correlator=object(), weight_set=weight_set)
+
+    assert pipeline.weight_set == weight_set
 
 
 # =====================================================================

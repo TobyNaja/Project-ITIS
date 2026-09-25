@@ -48,7 +48,7 @@ src `198.51.100.77` (T5 = `192.168.2.10` ที่ใส่ใน allowlist ช�
 | M4 End-to-End Latency | T4, n=5 | mean **1593.4 ms** (median 1584.1, 1513.4–1695.5) | t_block_verified − t_event |
 | M5 Detection Success | T1–T4 | **55/55** (100%) | alert ที่ inject ถูกบันทึกใน security_events |
 | M6 Automated Action Success | T4, T7 | **10/10** (100%) | BLOCK SUCCESS + VERIFIED / decision BLOCK |
-| M7 False Positive (scenario-defined) | T1, T2, T3, T10 | **0/25** (0%) | block ที่ไม่ควรเกิด / non-block cases — **ไม่ใช่** FP rate ทั่วไป |
+| M7 False Positive (scenario-defined) | T1, T2, T3, T10 | **0/25** (ไม่แสดงเป็นเปอร์เซ็นต์ — Blueprint §1.6) | block ที่ไม่ควรเกิด / non-block cases — **ไม่ใช่** FP rate ทั่วไป |
 | M8 Allowlist Safety | T5 | **5/5** (100%) | allowlisted source ไม่ถูก block |
 | M9 Auto-Unblock Success | T6 | **5/5** (100%) | UNBLOCK VERIFIED / block ที่หมดอายุ (ทุก block ใน dataset 18/18) |
 | M10 Recovery Success | T8 | **5/5** (100%) | failure ที่ออกแบบให้กู้ได้ · recovery time mean 26,357 ms (26,275–26,487) |

@@ -80,7 +80,7 @@ M3 ส่วน `t_block_verified − t_block_cmd` เป็นเวลาร�
 |---|---|---|---|
 | M5 Detection Success | T1–T4 | 55/55 (100%) | alert ที่ inject ถูกบันทึก / alert ที่ inject |
 | M6 Automated Action Success | T4, T7 | 10/10 (100%) | BLOCK SUCCESS + VERIFIED / decision BLOCK |
-| M7 False Positive (scenario-defined) | T1, T2, T3, T10 | 0/25 (0%) | block ที่ไม่ควรเกิด / non-block cases |
+| M7 False Positive (scenario-defined) | T1, T2, T3, T10 | 0/25 (ไม่แสดงเป็นเปอร์เซ็นต์ — Blueprint §1.6) | block ที่ไม่ควรเกิด / non-block cases |
 | M8 Allowlist Safety | T5 | 5/5 (100%) | allowlisted source ที่ไม่ถูก block |
 | M9 Auto-Unblock Success | T6 | 5/5 (100%) | UNBLOCK VERIFIED / block ที่หมดอายุ |
 | M10 Recovery Success | T8 | 5/5 (100%) | กู้คืนสำเร็จ / failure ที่ออกแบบให้กู้ได้ · mean 26,357 ms |
@@ -123,7 +123,7 @@ BLOCK with successful verification.
 | O4 Rule-Based Automated Response | PASS | RULE-001/002/003 ให้ผลตามที่กำหนดทุก run (T3, T4, T5) |
 | O5 pfSense Temporary Block | PASS | BLOCK SUCCESS + VERIFIED 18/18 |
 | O6 Auto-Unblock | PASS | T6 5/5 · ทุก block ใน dataset unblock สำเร็จ 18/18 |
-| O7 Verify การ enforce จริง | PASS (ระดับ read-back) | engine read-back + `pfctl` read-back 5/5 · traffic verification ทำไม่ได้ (L6) |
+| O7 Verify การ enforce จริง | PARTIAL (read-back verified) | Firewall state verification was successfully demonstrated in all applicable runs (engine read-back 18/18 · `pfctl` read-back ใน T7 5/5); direct traffic-path verification was not available in the experimental environment (L6) |
 | O8 Allowlist Safety | PASS | T5 5/5 ไม่ถูก block |
 | O9 Audit Trail | PASS | 8 ตารางมีข้อมูลเชื่อมโยงกันครบ (event → pattern → risk → decision → action) |
 | O10 Functional Recovery (retry ≤ 3) | PASS | T8 กู้คืน 5/5 · T9 หยุดที่ 3 attempts 5/5 |

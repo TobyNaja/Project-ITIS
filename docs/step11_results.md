@@ -100,7 +100,8 @@ command + verification บน pfSense (~412 ms) · การตัดสิน�
 retry loop (T9 5/5)
 
 **F5 — Sensitivity:** weight set เปลี่ยน risk score และ risk level แต่ไม่เปลี่ยน action ใน pattern ที่ทดสอบ
-→ การตัดสินใจถูกกำหนดโดยกฎ (rule-based) มากกว่าน้ำหนัก
+→ การตัดสินใจถูกกำหนดโดยกฎ (rule-based) · เป็นผลเชิงโครงสร้าง: เงื่อนไขใน `config/rules.yaml`
+ไม่อิง risk_level/risk_score (§3.5 — ใช้เพื่อ audit/explainability) weight set จึงเปลี่ยน action ไม่ได้
 
 ไม่มีการอ้างว่า "ลดเวลาตอบสนองได้ X%" เพราะไม่มี manual baseline ที่วัดได้อย่าง valid
 

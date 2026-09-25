@@ -175,21 +175,21 @@ JSON (Suricata/EVE), การเชื่อมโยง alert ตามแห�
 
 ## เอกสารอ้างอิง (บทที่ 2)
 
-รูปแบบ: IEEE · URL ตรวจเมื่อ 2026-09-25 · DOI ตรวจกับ Crossref แล้ว
+รูปแบบ: IEEE · URL ตรวจเมื่อ 2026-09-25 · DOI ตรวจกับ Crossref แล้ว · เอกสาร Suricata อ้างตาม version ที่ใช้ใน lab (7.0.8) และตรวจว่าข้อความที่ยกมามีอยู่ใน version นั้น
 
-[1] Netgate, "pfSense® software documentation: Introduction." [Online]. Available: https://docs.netgate.com/pfsense/en/latest/general/index.html
+[1] Netgate, "pfSense® software documentation: Introduction." [Online]. Available: https://docs.netgate.com/pfsense/en/latest/general/index.html (Netgate เผยแพร่เอกสารฉบับเดียวไม่แยกตาม version · lab ใช้ pfSense CE 2.7.2)
 
 [2] Netgate, "Alias Features and Limitations," pfSense® software documentation. [Online]. Available: https://docs.netgate.com/pfsense/en/latest/firewall/aliases-features.html
 
-[3] The FreeBSD Project, "pf.conf(5) — packet filter configuration file," FreeBSD Manual Pages. [Online]. Available: https://man.freebsd.org/cgi/man.cgi?query=pf.conf&sektion=5
+[3] The FreeBSD Project, "pf.conf(5) — packet filter configuration file," FreeBSD 14.0-RELEASE Manual Pages. [Online]. Available: https://man.freebsd.org/cgi/man.cgi?query=pf.conf&sektion=5&manpath=FreeBSD+14.0-RELEASE (pfSense 2.7 สร้างบน FreeBSD 14-CURRENT จึงอ้าง 14.0-RELEASE ซึ่งใกล้ที่สุด)
 
-[4] Open Information Security Foundation, "What is Suricata," Suricata User Guide. [Online]. Available: https://docs.suricata.io/en/latest/what-is-suricata.html
+[4] Open Information Security Foundation, "What is Suricata," Suricata User Guide, ver. 7.0.8. [Online]. Available: https://docs.suricata.io/en/suricata-7.0.8/what-is-suricata.html
 
-[5] Open Information Security Foundation, "Eve JSON Output," Suricata User Guide. [Online]. Available: https://docs.suricata.io/en/latest/output/eve/eve-json-output.html
+[5] Open Information Security Foundation, "Eve JSON Output," Suricata User Guide, ver. 7.0.8. [Online]. Available: https://docs.suricata.io/en/suricata-7.0.8/output/eve/eve-json-output.html
 
-[6] Open Information Security Foundation, "Eve JSON Format," Suricata User Guide. [Online]. Available: https://docs.suricata.io/en/latest/output/eve/eve-json-format.html
+[6] Open Information Security Foundation, "Eve JSON Format," Suricata User Guide, ver. 7.0.8. [Online]. Available: https://docs.suricata.io/en/suricata-7.0.8/output/eve/eve-json-format.html
 
-[7] Open Information Security Foundation, "Meta Keywords (priority)," Suricata User Guide. [Online]. Available: https://docs.suricata.io/en/latest/rules/meta.html
+[7] Open Information Security Foundation, "Meta Keywords (priority)," Suricata User Guide, ver. 7.0.8. [Online]. Available: https://docs.suricata.io/en/suricata-7.0.8/rules/meta.html
 
 [8] FIRST, "Common Vulnerability Scoring System Version 4.0: Specification Document," ver. 1.2, Jun. 2024. [Online]. Available: https://www.first.org/cvss/v4-0/specification-document
 

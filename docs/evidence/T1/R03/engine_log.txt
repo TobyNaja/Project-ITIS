@@ -1,0 +1,15 @@
+2026-09-24T15:27:20Z INFO     run_phase4 :: เริ่ม ITIS engine (weight_set=A, block_duration=300s)
+2026-09-24T15:27:21Z INFO     run_phase4 :: บันทึก FR-15 experiment_timestamps: test_id=T1 run=T1-R03
+2026-09-24T15:27:21Z INFO     security_engine.ingestion.eve_reader :: เริ่มอ่าน EVE จาก admin@192.168.227.150:/var/log/suricata/suricata_em224404/eve.json
+2026-09-24T15:27:21Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1920)
+2026-09-24T15:27:21Z DEBUG    security_engine.health.monitor :: Suricata health = HEALTHY (stats_age=0.0s)
+2026-09-24T15:27:31Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1930)
+2026-09-24T15:27:36Z DEBUG    security_engine.health.monitor :: Suricata health = HEALTHY (stats_age=5.2s)
+2026-09-24T15:27:41Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1940)
+2026-09-24T15:27:51Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1950)
+2026-09-24T15:27:51Z DEBUG    security_engine.health.monitor :: Suricata health = HEALTHY (stats_age=0.3s)
+2026-09-24T15:28:01Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1960)
+2026-09-24T15:28:06Z DEBUG    security_engine.health.monitor :: Suricata health = HEALTHY (stats_age=5.5s)
+2026-09-24T15:28:11Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1970)
+2026-09-24T15:28:21Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=1980)
+2026-09-24T15:28:21Z DEBUG    security_engine.health.monitor :: Suricata health = HEALTHY (stats_age=0.7s)

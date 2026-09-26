@@ -3,7 +3,7 @@
 - engine: 2026-09-25T13:52:38Z → 2026-09-25T13:54:41Z (logs/engine.log บรรทัด 1472-1512)
 - input: fault injection: suricata.sh stop ระหว่าง engine ทำงาน · restart_command=/usr/bin/false ชั่วคราว (คืนค่าด้วย git checkout หลังจบ T9) · POST_WAIT 120 s
 - src_ip: — · variant: — · weight_set: A
-- ผลตรวจหลัง run: PASS: DEGRADED PROCESS_DOWN @13:52:54Z -> attempt 1 FAIL / 2 FAIL / 3 CRITICAL (recovery_events id 6-8) · ไม่มี attempt 4 · runner latch CRITICAL 7 รอบจนจบ (ไม่มี infinite retry) · health loop ทำงานต่อ (engine ไม่ตาย) · Suricata ถูก start กลับด้วยมือ PID 86127->none->14302 + stats ใหม่ · failure_reason เก็บ stderr ของ ssh (post-quantum warning) แทนข้อความของ /usr/bin/false — rc=1 ถูกต้อง · ตารางอื่น +0 · t_fault=2026-09-25T13:52:40.040327Z
+- ผลตรวจหลัง run: PASS: DEGRADED PROCESS_DOWN @13:52:54Z -> attempt 1 FAIL / 2 FAIL / 3 CRITICAL (recovery_events id 6-8) · ไม่มี attempt 4 · runner latch CRITICAL 7 รอบจนจบ (ไม่มี infinite retry) · health loop ทำงานต่อ (engine ไม่ตาย) · Suricata ถูก start กลับด้วยมือ PID 86127->none->14302 + stats ใหม่ · failure_reason = PROCESS_DOWN; stderr ของ ssh (post-quantum warning) อยู่ในคอลัมน์ error ต่อจาก rc=1 — rc=1 ถูกต้อง · ตารางอื่น +0 · t_fault=2026-09-25T13:52:40.040327Z
 
 ## แถวใน `data/step11_experiment.db` ของ run นี้
 

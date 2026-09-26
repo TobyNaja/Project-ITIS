@@ -121,8 +121,8 @@ event was injected during this interval.
 
 **L3 — T9 ไม่มี inter-attempt delay:** attempt 1–3 เกิดติดกันภายใน < 1 s (ไม่มี backoff)
 
-**L4 — T9 failure message:** `failure_reason` มี stderr ของ SSH (post-quantum warning) ปนแทนข้อความของ
-`/usr/bin/false` · rc=1 ทุก attempt ยังยืนยัน failure ได้
+**L4 — T9 error message:** `failure_reason` = `PROCESS_DOWN` (ถูกต้อง) · ข้อความเตือนของ SSH (post-quantum warning)
+ถูกบันทึกในคอลัมน์ `error` ต่อจาก `rc=1` (`/usr/bin/false` ไม่พิมพ์ข้อความ) · rc=1 ทุก attempt ยังยืนยัน failure ได้
 
 **L5 — Factor C = 30 (Known Lab Asset) ไม่ได้ทดลอง:** `config/assets.yaml` ว่างโดยตั้งใจ เพราะไม่มี
 asset ใน lab ที่ยืนยัน role ได้ · dataset ครอบคลุมเฉพาะ C = 80 (unknown) และ C = 0 (allowlisted)

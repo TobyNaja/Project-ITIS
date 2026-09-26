@@ -48,8 +48,8 @@ health loop ทำงานต่ออีก 7 รอบ · พิสูจน�
 > The engine remained operational in the health loop after entering CRITICAL, but event-processing
 > continuity during CRITICAL was not directly verified because no event was injected during this interval.
 
-ข้อจำกัดเพิ่ม: attempt 1–3 เกิดติดกันภายใน < 1 s (ไม่มี backoff) · `failure_reason` มี stderr ของ SSH
-(post-quantum warning) ปนแทนข้อความของ `/usr/bin/false` — rc=1 ยังยืนยัน failure ได้
+ข้อจำกัดเพิ่ม: attempt 1–3 เกิดติดกันภายใน < 1 s (ไม่มี backoff) · `failure_reason` = `PROCESS_DOWN`;
+ข้อความเตือนของ SSH (post-quantum warning) ถูกบันทึกในคอลัมน์ `error` ต่อจาก `rc=1` — rc=1 ยังยืนยัน failure ได้
 
 **T11** — Under the tested input pattern, changing the weight set changed the numerical risk score and
 risk classification (A 79.5 HIGH · B 80.5 CRITICAL · C 78.5 HIGH), but did not change the resulting

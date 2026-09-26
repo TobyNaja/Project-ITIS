@@ -221,8 +221,8 @@ complete service orchestration or high-availability architecture.
   but event-processing continuity during CRITICAL was not directly verified because no event was injected
   during this interval.
 - **L3 T9 retry timing** — attempt 1–3 เกิดติดกันภายใน < 1 s ไม่มี inter-attempt delay
-- **L4 T9 failure message** — `failure_reason` มีข้อความเตือนของ SSH ปนแทนข้อความของ `/usr/bin/false`
-  · rc=1 ทุก attempt ยังยืนยัน failure ได้
+- **L4 T9 error message** — `failure_reason` = `PROCESS_DOWN` · ข้อความเตือนของ SSH ถูกบันทึกในคอลัมน์ `error`
+  ต่อจาก `rc=1` · rc=1 ทุก attempt ยังยืนยัน failure ได้
 - **L5 Factor C = 30** — Known Lab Asset ไม่ได้ทดลอง เพราะไม่มี asset ใน lab ที่ยืนยัน role ได้
   (`config/assets.yaml` ว่างโดยตั้งใจ) · dataset ครอบคลุม C = 80 และ C = 0 เท่านั้น
 - **L6 T7 traffic verification** — ยืนยันได้ระดับ pf table read-back เท่านั้น · การยิง traffic ผ่าน firewall
@@ -260,5 +260,5 @@ predefined response ภายใต้ scenario ที่กำหนด — ไ
 - เพิ่ม inter-attempt delay/backoff ใน recovery และทดสอบการประมวลผล event ระหว่าง CRITICAL (L2, L3)
 - แยก timestamp ของ command กับ verification ใน enforcement path (L8)
 - ทดสอบ traffic verification ด้วย host จริงหลัง firewall (L6) และ factor C = 30 เมื่อมี asset ที่ยืนยันได้ (L5)
-- วัด overhead ด้วย Prometheus/Grafana (L10) และแก้การเก็บ stderr ของ SSH ใน failure_reason (L4)
+- วัด overhead ด้วย Prometheus/Grafana (L10) และแยก stderr ของ SSH ออกจากคอลัมน์ error ของ recovery_events (L4)
 - Adaptive blocking (escalating duration) ซึ่งอยู่นอก scope ของโครงงานนี้

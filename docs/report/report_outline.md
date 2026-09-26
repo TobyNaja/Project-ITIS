@@ -23,52 +23,22 @@ Response + Security Service Recovery (ระบบวิเคราะห์เ
 
 ---
 
-## B. โครงสร้างเล่ม
+## B. โครงสร้างเล่ม (ตามฉบับที่เขียนจริง — อัปเดต 2026-09-26 หลัง consistency check)
 
-### บทที่ 1 บทนำ
-1.1 ที่มาและความสำคัญ (IDS ตรวจจับได้แต่ตอบสนองด้วยมือ · single alert อาจเป็น FP · automated block ต้องมี safety/audit/reversibility — Blueprint §1.3)
-1.2 Problem statement · 1.3 **Research Question** (อ้างตามต้นฉบับภาษาอังกฤษ)
-1.4 วัตถุประสงค์ — **ตาราง 1.1 O1–O11**
-1.5 ขอบเขต — in-scope / out-of-scope (Blueprint §1.5) · 1.6 ประโยชน์ที่คาดว่าจะได้รับ · 1.7 ข้อจำกัดเบื้องต้น
+**Front matter (เพิ่มตอนรวมเล่ม ไม่อยู่ในบท 1–7):** ปก (ชื่อโครงงานตามที่ยื่น) · บทคัดย่อ (ไทย/อังกฤษ) · กิตติกรรมประกาศ · สารบัญ/สารบัญตาราง/สารบัญรูป
 
-### บทที่ 2 ทฤษฎีและงานที่เกี่ยวข้อง
-2.1 Firewall และ pfSense (pf tables) · 2.2 IDS และ Suricata (rules, severity, EVE JSON) · 2.3 Event correlation
-2.4 Risk assessment (CVSS v4.0 — severity concept; NIST SP 800-61 — incident handling) — ต้องมี disclaimer §1.6
-2.5 Rule-based automated response และ safety control (allowlist, temporary block, verification)
-2.6 Service health monitoring/recovery · 2.7 Audit trail · 2.8 งานที่เกี่ยวข้อง (SOAR/IPS — เพื่อวางตำแหน่ง ไม่ใช่เทียบผล)
+| บท | ไฟล์ | หัวข้อหลัก |
+|---|---|---|
+| 1 บทนำ | `chapter1-introduction.md` | 1.1 ที่มา · 1.2 problem statement · 1.3 RQ · 1.4 O1–O11 (ตาราง 1.1) · 1.5 ขอบเขต · 1.6 ประโยชน์ · 1.7 ข้อจำกัด · 1.8 โครงสร้างรายงาน |
+| 2 ทฤษฎี | `chapter2-theory.md` | 2.1–2.10 แนวคิด (pfSense/pf, Suricata/EVE, correlation, CVSS/NIST, IRS, allowlist/fail-safe, recovery, SOAR) · 2.11 งานที่เกี่ยวข้อง · 2.12 สรุป · อ้างอิง |
+| 3 ออกแบบ | `chapter3-design.md` | 3.1 architecture · 3.2 network · 3.3 Suricata · 3.4 EVE processing · 3.5 correlation · 3.6 risk (ตาราง 3.2–3.4) · 3.7 rules + allowlist (ตาราง 3.5) · 3.8 blocking/verification · 3.9 unblock/recovery · 3.10 data flow/DB (ตาราง 3.7) · 3.11 modules/parameters · 3.12 การออกแบบการทดลอง — fail-safe อยู่ใน 3.8–3.9 ไม่แยกหัวข้อ |
+| 4 พัฒนา | `chapter4-implementation.md` | 4.1 เครื่องมือ · 4.2 configuration · 4.3 ingestion · 4.4 pipeline · 4.5 correlation · 4.6 risk · 4.7 rule · 4.8 enforcer · 4.9 lifecycle · 4.10 audit · 4.11 health/recovery · 4.12 logging · 4.13 instrumentation · 4.14 testing |
+| 5 ทดลอง | `chapter5-experiment.md` | 5.1 environment · 5.2 การเตรียมระบบ (dry run) · 5.3 วิธีการ (injection, ขั้นตอน, จำนวนรอบ, revision) · 5.4 T1–T11 · 5.5 timestamp · 5.6 M1–M10 + M11–M14 · 5.7 วิธีวิเคราะห์ · 5.8 dataset control/freeze · 5.9 สรุป — **ไม่มีตัวเลขผล** |
+| 6 ผล/อภิปราย | `chapter6-results.md` | 6.1 T1–T11 · 6.2 M1–M4 + รูป 6.1 · 6.3 M5–M10, T9, recovery time (supplementary) · 6.4 T11 · 6.5 O1–O11 · 6.6 อภิปราย · 6.7 F1–F5 · 6.8 ข้อจำกัด + deviations — **ไม่มี RQ/conclusion/future work** |
+| 7 สรุป | `chapter7-conclusion.md` | 7.1 สรุปการดำเนินงาน · 7.2 ตอบ RQ · 7.3 ผลตามวัตถุประสงค์ · 7.4 ข้อจำกัด · 7.5 แนวทางพัฒนาต่อ |
+| ภาคผนวก | `appendix.md` | ก frozen dataset + SHA-256 เต็ม + การแก้เอกสารหลัง freeze · ข registry 58 runs · ค commit/revision |
 
-### บทที่ 3 การวิเคราะห์และออกแบบระบบ
-3.1 ภาพรวม architecture (Suricata = เห็น · Python = คิด · pfSense = ทำ · SQLite = จำ) — **ตาราง 3.1 Components**
-3.2 Data flow: EVE → ingestion → correlation → risk → rule → enforcement → verify → audit → lifecycle (unblock)
-3.3 Sequence diagram event → block → unblock · 3.4 Correlation (source IP + window 10 s + min_events 5 + severity)
-3.5 Risk Model — **ตาราง 3.2** weights + lookup S/F/T/C + level thresholds (ดู § C) · 3.6 Decision rules — **ตาราง 3.3**
-3.7 Allowlist (สองชั้น: C = 0 ในชั้น risk + RULE-003 override) · 3.8 Temporary block/lifecycle (300 s, reconcile ตอน start)
-3.9 Enforcement verification (read-back) · 3.10 Health/recovery (PROCESS_DOWN/EVE_STALE, retry ≤ 3, CRITICAL latch)
-3.11 Database schema 8 ตาราง (ER diagram) · 3.12 Fail-safe behaviour
-
-### บทที่ 4 การพัฒนาระบบ
-4.1 โครงสร้าง project · 4.2 ingestion (`eve_reader.py`, SSH tail) · 4.3 correlation (`correlation/engine.py`)
-4.4 risk (`scoring/risk.py`) · 4.5 rule engine (`policy/rule_engine.py`, `config/rules.yaml`)
-4.6 source context (`policy/allowlist.py`, `assets.py`, `source_context.py`) · 4.7 enforcement (`pfsense_enforcer.py`: SSH + pfctl)
-4.8 lifecycle (`lifecycle/*`) · 4.9 audit (`storage/*`) · 4.10 health/recovery (`health/*`)
-4.11 configuration (`config/config.yaml`, env vars NFR-07) · 4.12 logging · 4.13 experiment instrumentation (FR-15 `timestamp_sink.py`)
-4.14 testing (unit/integration, 828 passed / 10 skipped — skip = ต้องมี pfSense จริง)
-→ ใช้ snippet/pseudocode เฉพาะจุดสำคัญ ไม่ใส่ source ทั้งไฟล์
-
-### บทที่ 5 การทดลองและวิธีประเมินผล
-5.1 สภาพแวดล้อม (pfSense 2.7.2, Suricata 7.0.8, GNS3/VMware, Windows host) — ตาราง hardware/software
-5.2 Network topology · 5.3 วิธีป้อน input: **controlled EVE injection เป็นหลัก** (Kali = supplementary เท่านั้น)
-5.4 **ตาราง 5.1 T1–T11** (scenario, input, expected, จำนวน run) · 5.5 **M1–M10** (นิยาม + แหล่งข้อมูล)
-5.6 Timestamp methodology (same-host SEC01, FR-15) + clock observation · 5.7 ขั้นตอนต่อ run (engine ใหม่ทุก run)
-5.8 Dataset freeze และ validation (เขียนเป็นข้อความ — hash/commit อยู่ใน evidence repo) · 5.9 วิธีวิเคราะห์ (สถิติเชิงพรรณนา)
-
-### บทที่ 6 ผลการทดลองและอภิปรายผล
-6.1 **ตาราง 6.1 Functional results T1–T11** · 6.2 **ตาราง 6.2 Latency M1–M4** + รูป M4 breakdown
-6.3 **ตาราง 6.3 Success/safety M5–M10** (M10 = T8, T9 แยก) · 6.4 T11 sensitivity · 6.5 ตาราง O1–O11
-6.6 Discussion (6 ประเด็นใน step11-chapter §6) · 6.7 Findings F1–F5 · 6.8 Limitations (Blueprint §15.3 + L1–L10)
-
-### บทที่ 7 สรุปและข้อเสนอแนะ
-7.1 ตอบ RQ · 7.2 สรุปสิ่งที่ระบบทำได้ · 7.3 สรุปผลการทดลอง · 7.4 ข้อจำกัด · 7.5 Future work
+**ไม่รวมในเล่ม:** `phase12-results.md` (สถานะก่อน alignment) · `step11-chapter.md` (ร่าง ใช้เป็นวัตถุดิบบท 6)
 
 ---
 
@@ -135,5 +105,6 @@ Environment, Recovery) ใช้ตามต้นฉบับใน `docs/repor
 - [ ] Architecture ในบท 3 ตรงกับ code (รวมสิ่งที่ไม่ได้ implement) · [ ] Risk model / weight sets / thresholds ตรง § C
 - [ ] Rules ตรง `config/rules.yaml` · [ ] ตัวเลขทุกตัวในบท 6 ตรง `docs/evidence/step11_metrics.md`
 - [ ] ไม่มีถ้อยคำในคอลัมน์ "ห้ามเขียน" ของ § D · [ ] Code revision: T1–T10 `236ce70`, T11 `d0a346d` (บท 5)
-- [ ] ไม่มี commit hash / SHA-256 / path ภายในในเนื้อหาหลัก (ย้ายไปภาคผนวกหรือ evidence)
+- [ ] commit hash ในเนื้อหาหลักเฉพาะ revision ของการทดลอง (บท 5 §5.3.5, บท 6 ต้นบท) · path ใช้ได้เมื่อเป็นส่วนของ implementation/วิธีการ (บท 4–5) · SHA-256 และรายการ commit อยู่ในภาคผนวก
+- [ ] front matter (ปก ชื่อโครงงาน บทคัดย่อ สารบัญ) เพิ่มตอนรวมเล่ม · ไม่รวม `phase12-results.md` และ `step11-chapter.md`
 - [ ] ตาราง/รูปมีเลขและอ้างถึงในเนื้อหา · [ ] อ้างอิงครบ (pfSense, Suricata, CVSS v4.0, NIST SP 800-61)

@@ -229,8 +229,9 @@ sequenceDiagram
 | CRITICAL | การกู้คืนล้มเหลวครบ 3 ครั้ง |
 
 - Health runner (thread แยก) ตรวจทุก 15 s ตรวจ process ด้วย `pgrep -x suricata` และอ่านเวลาของ stats ล่าสุดจาก EVE
-- เมื่อ DEGRADED จะกู้คืนไม่เกิน 3 ครั้ง: สั่ง restart → ตรวจซ้ำทุก 5 s ไม่เกิน 30 s ต่อ attempt **การกู้คืนนับว่าสำเร็จเมื่อมี stats ของ process ใหม่** (ตรวจจาก
-  `uptime` ใน stats) ไม่ใช่แค่ restart คืนค่าสำเร็จ เพื่อไม่ให้ stats ที่ process เก่าเขียนไว้ก่อนหยุดทำงานถูกนับเป็นหลักฐาน
+- เมื่อ DEGRADED จะกู้คืนไม่เกิน 3 ครั้ง: สั่ง restart → ถ้าคำสั่ง restart สำเร็จ ตรวจซ้ำทุก 5 s (ครั้งแรกหลังรอ 5 s) รวมไม่เกิน 30 s **การกู้คืนนับว่าสำเร็จเมื่อมี stats
+  ของ process ใหม่** (ตรวจจาก `uptime` ใน stats) ไม่ใช่แค่ restart คืนค่าสำเร็จ เพื่อไม่ให้ stats ที่ process เก่าเขียนไว้ก่อนหยุดทำงานถูกนับเป็นหลักฐาน
+- ถ้าคำสั่ง restart คืนค่าล้มเหลว ระบบไปยัง attempt ถัดไป**ทันที**โดยไม่มีช่วงรอ (การรอ 5 s และการตรวจไม่เกิน 30 s เกิดเฉพาะหลัง restart สำเร็จ)
 - ครบ 3 ครั้งแล้วยังไม่สำเร็จ → CRITICAL ระบบ**หยุดพยายาม restart** (ไม่มี attempt ที่ 4) จนกว่าสุขภาพจะกลับเป็น HEALTHY เอง แต่ engine ไม่หยุดทำงาน
 - ทุก attempt บันทึกลง `recovery_events` (SUCCESS / FAIL / CRITICAL)
 
@@ -259,7 +260,7 @@ erDiagram
 | `decisions` | rule_id, decision, allowlisted, reason |
 | `actions` | BLOCK / UNBLOCK / ALERT พร้อม command_result, verify_result, error |
 | `active_blocks` | สถานะปัจจุบันของการปิดกั้นต่อ source: ACTIVE / EXPIRED / MANUALLY_REMOVED / REMOVE_FAILED |
-| `recovery_events` | attempt, failure_reason, result ของการกู้คืน Suricata |
+| `recovery_events` | service, failure_reason, attempt, result และ error (ข้อความผิดพลาดพร้อม return code) ของการกู้คืน Suricata |
 | `experiment_timestamps` | จุดเวลาสำหรับวัดผลการทดลอง (t_event, t_detection, t_decision, t_block_cmd, t_block_verified) |
 
 `active_blocks` ใช้ source IP เป็น primary key จึงเก็บเฉพาะสถานะล่าสุดของแต่ละ source ประวัติการปิดกั้นทั้งหมดอยู่ใน `actions`
@@ -297,6 +298,6 @@ erDiagram
 
 ## 3.12 การออกแบบการทดลอง
 
-การออกแบบการทดลอง (สถานการณ์ T1–T11, ตัวชี้วัด M1–M10, วิธีป้อนข้อมูล และวิธีบันทึกเวลา) อธิบายในบทที่ 5
+การออกแบบการทดลอง (สถานการณ์ T1–T11, ตัวชี้วัด M1–M10 และการครอบคลุม M11–M14 ของ Blueprint, วิธีป้อนข้อมูล และวิธีบันทึกเวลา) อธิบายในบทที่ 5
 ในระดับการออกแบบระบบ ส่วนที่รองรับการทดลองคือ `experiment_timestamps` ซึ่งบันทึกจุดเวลาของแต่ละขั้นในเส้นทางการตอบสนอง
 และการระบุ test/run ของการทดลองแต่ละครั้ง โดยไม่เปลี่ยนตรรกะของ pipeline

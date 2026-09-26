@@ -1,0 +1,170 @@
+# ภาคผนวก
+
+## ภาคผนวก ก Frozen Dataset และหลักฐานสำหรับการตรวจซ้ำ (Reproducibility Evidence)
+
+### ก.1 ไฟล์ฐานข้อมูลที่ใช้วิเคราะห์
+
+| รายการ | ค่า |
+|---|---|
+| ไฟล์ | `data/step11_experiment.db` (ไม่อยู่ใน version control) |
+| SHA-256 | `d4ffe24457eb1e64723bd4b8c72a42bf6de81f9a074a3c0061a9a2087039b805` |
+| สำเนา archive | ไฟล์สำเนานอก repository ที่ hash ตรงกับต้นฉบับ |
+| การเตรียมก่อนคำนวณ hash | `PRAGMA wal_checkpoint(TRUNCATE)` = (0, 0, 0) · `journal_mode=DELETE` (ไฟล์เดียว ไม่มี `-wal`/`-shm`) |
+| `PRAGMA integrity_check` | ok |
+| วันที่ freeze | 25 กันยายน 2026 |
+
+**ตาราง ก.1** จำนวนแถวต่อตารางของชุดข้อมูลที่ freeze
+
+| ตาราง | แถว | หมายเหตุ |
+|---|---|---|
+| `security_events` | 173 | inject 170 + alert จริงจากเครือข่าย 3 แถว (ไม่ใช่ input ของ test) |
+| `correlated_patterns` | 28 | |
+| `risk_assessments` | 28 | |
+| `decisions` | 28 | |
+| `actions` | 46 | ALERT 10 · BLOCK 18 · UNBLOCK 18 |
+| `active_blocks` | 1 | primary key = source IP · สถานะ EXPIRED |
+| `recovery_events` | 20 | T8 5 · T9 15 |
+| `experiment_timestamps` | 28 | |
+
+แถวแรกของฐานข้อมูลเป็นของ T2-R01 (T1 ไม่สร้างแถว) dry run `T4-R00` เก็บในฐานข้อมูลแยกและไม่อยู่ในไฟล์นี้
+
+### ก.2 เอกสารหลักฐานของชุดข้อมูล
+
+| เอกสาร | เนื้อหา |
+|---|---|
+| `docs/evidence/step11_runs.csv` | registry ของ 58 runs (ภาคผนวก ข) |
+| `experiments/results_step11.csv` | ผลต่อ run 37 คอลัมน์ |
+| `docs/evidence/<T>/<Rnn>/` | `engine_log.txt` (ช่วง log ของ run) และ `summary.md` (สรุปผลและแถวในฐานข้อมูลของ run) |
+| `docs/evidence/step11_validation.md` | ผล validation 58/58 PASS |
+| `docs/evidence/step11_metrics.md` | ค่า M1–M10 และ T11 ที่คำนวณจากฐานข้อมูล |
+| `docs/evidence/step11_clock.md` | clock offset ที่วัดได้และข้อสังเกต |
+| `docs/evidence/step11_dataset_freeze.md` | บันทึกการ freeze, code revision ต่อช่วง และข้อความที่ใช้ในรายงาน |
+
+### ก.3 การแก้ไขเอกสารภายหลัง freeze
+
+หลังการ freeze ไม่มีการเปลี่ยนแปลงฐานข้อมูล ผลการทดลอง timestamp หรือค่าที่ใช้คำนวณ metrics มีเพียงการแก้ไขถ้อยคำในเอกสารประกอบบางรายการ
+เพื่อแก้การระบุ field ของ T9 ให้ถูกต้อง คือ `failure_reason` = `PROCESS_DOWN` ส่วนข้อความเตือนของ SSH ถูกบันทึกใน field `error` ต่อจาก `rc=1`
+
+| commit | ไฟล์ที่แก้ | สิ่งที่แก้ |
+|---|---|---|
+| `c11aff3` | `docs/step11_results.md`, `docs/evidence/step11_dataset_freeze.md`, `docs/report/step11-chapter.md` | ถ้อยคำของข้อจำกัด T9 |
+| `6f75145` | `docs/evidence/step11_runs.csv`, `experiments/results_step11.csv`, `docs/evidence/T9/R01–R05/summary.md` | ข้อความใน note (15 จุด) · ไม่แตะค่าในคอลัมน์อื่นและ JSON ของแถวในฐานข้อมูล |
+
+SHA-256 ของฐานข้อมูลหลังการแก้ไขทั้งสองครั้งยังเป็นค่าเดิมในหัวข้อ ก.1
+
+### ก.4 การตรวจซ้ำ
+
+ค่าทั้งหมดในบทที่ 6 คำนวณซ้ำได้จากฐานข้อมูลในหัวข้อ ก.1 และ registry ในภาคผนวก ข โดยผูกแถวในฐานข้อมูลกับ run ด้วยช่วงเวลาที่ engine ทำงาน
+และผูก `experiment_timestamps` ด้วย `notes` ที่ขึ้นต้นด้วย `run=<run_id>;` สถิติ latency ใช้ sample standard deviation (n − 1)
+
+## ภาคผนวก ข Test Run และ Evidence Registry
+
+registry และ results CSV เป็น**หลักฐานประกอบ** ที่บันทึกตัวตนและช่วงเวลาของแต่ละ run ส่วน **source of truth ของผลการทดลองคือฐานข้อมูลที่ freeze แล้ว**
+(ภาคผนวก ก.1) ค่าทุกค่าในบทที่ 6 คำนวณจากฐานข้อมูล โดยใช้ registry เพียงเพื่อผูกแถวในฐานข้อมูลกับ run และตาราง ข.1 สร้างจาก registry และผล validation
+ด้วยสคริปต์ ไม่ได้พิมพ์ด้วยมือ
+
+**ตาราง ข.1** รายการ run ทั้ง 58 runs (เวลา UTC · ผลจาก validation)
+
+| run_id | variant / weight set | source IP | engine start – stop (UTC) | validation |
+|---|---|---|---|---|
+| T1-R01 | — | — | 2026-09-24 15:16:08 – 15:17:12 | PASS |
+| T1-R02 | — | — | 2026-09-24 15:26:15 – 15:27:17 | PASS |
+| T1-R03 | — | — | 2026-09-24 15:27:20 – 15:28:22 | PASS |
+| T1-R04 | — | — | 2026-09-24 15:28:26 – 15:29:28 | PASS |
+| T1-R05 | — | — | 2026-09-24 15:29:31 – 15:30:33 | PASS |
+| T2-R01 | — | 198.51.100.77 | 2026-09-24 15:32:59 – 15:33:32 | PASS |
+| T2-R02 | — | 198.51.100.77 | 2026-09-24 15:33:44 – 15:34:16 | PASS |
+| T2-R03 | — | 198.51.100.77 | 2026-09-24 15:34:23 – 15:34:55 | PASS |
+| T2-R04 | — | 198.51.100.77 | 2026-09-24 15:35:03 – 15:35:34 | PASS |
+| T2-R05 | — | 198.51.100.77 | 2026-09-24 15:35:42 – 15:36:13 | PASS |
+| T3-R01 | — | 198.51.100.77 | 2026-09-24 15:36:52 – 15:37:24 | PASS |
+| T3-R02 | — | 198.51.100.77 | 2026-09-24 15:37:32 – 15:38:03 | PASS |
+| T3-R03 | — | 198.51.100.77 | 2026-09-24 15:38:11 – 15:38:43 | PASS |
+| T3-R04 | — | 198.51.100.77 | 2026-09-24 15:38:51 – 15:39:23 | PASS |
+| T3-R05 | — | 198.51.100.77 | 2026-09-24 15:39:31 – 15:40:02 | PASS |
+| T4-R01 | — | 198.51.100.77 | 2026-09-24 15:40:49 – 15:46:12 | PASS |
+| T4-R02 | — | 198.51.100.77 | 2026-09-24 15:46:18 – 15:51:42 | PASS |
+| T4-R03 | — | 198.51.100.77 | 2026-09-24 15:51:48 – 15:57:12 | PASS |
+| T4-R04 | — | 198.51.100.77 | 2026-09-24 15:57:18 – 16:02:42 | PASS |
+| T4-R05 | — | 198.51.100.77 | 2026-09-24 16:02:47 – 16:08:12 | PASS |
+| T5-R01 | — | 192.168.2.10 | 2026-09-24 16:08:48 – 16:09:22 | PASS |
+| T5-R02 | — | 192.168.2.10 | 2026-09-24 16:09:27 – 16:10:02 | PASS |
+| T5-R03 | — | 192.168.2.10 | 2026-09-24 16:10:07 – 16:10:42 | PASS |
+| T5-R04 | — | 192.168.2.10 | 2026-09-24 16:10:46 – 16:11:22 | PASS |
+| T5-R05 | — | 192.168.2.10 | 2026-09-24 16:11:26 – 16:11:57 | PASS |
+| T6-R01 | — | 198.51.100.77 | 2026-09-24 16:12:39 – 16:18:02 | PASS |
+| T6-R02 | — | 198.51.100.77 | 2026-09-24 16:18:09 – 16:23:32 | PASS |
+| T6-R03 | — | 198.51.100.77 | 2026-09-24 16:23:38 – 16:29:02 | PASS |
+| T6-R04 | — | 198.51.100.77 | 2026-09-24 16:29:08 – 16:34:32 | PASS |
+| T6-R05 | — | 198.51.100.77 | 2026-09-24 16:34:38 – 16:40:02 | PASS |
+| T7-R01 | — | 198.51.100.77 | 2026-09-24 16:40:32 – 16:45:52 | PASS |
+| T7-R02 | — | 198.51.100.77 | 2026-09-24 16:46:02 – 16:51:22 | PASS |
+| T7-R03 | — | 198.51.100.77 | 2026-09-24 16:51:31 – 16:56:52 | PASS |
+| T7-R04 | — | 198.51.100.77 | 2026-09-24 16:57:01 – 17:02:22 | PASS |
+| T7-R05 | — | 198.51.100.77 | 2026-09-24 17:02:31 – 17:07:52 | PASS |
+| T8-R01 | — | — | 2026-09-24 17:08:27 – 17:10:27 | PASS |
+| T8-R02 | — | — | 2026-09-24 17:11:12 – 17:13:12 | PASS |
+| T8-R03 | — | — | 2026-09-24 17:13:42 – 17:15:42 | PASS |
+| T8-R04 | — | — | 2026-09-24 17:16:13 – 17:18:13 | PASS |
+| T8-R05 | — | — | 2026-09-24 17:18:44 – 17:20:44 | PASS |
+| T9-R01 | — | — | 2026-09-25 13:52:38 – 13:54:41 | PASS |
+| T9-R02 | — | — | 2026-09-25 13:55:10 – 13:57:13 | PASS |
+| T9-R03 | — | — | 2026-09-25 13:57:34 – 13:59:37 | PASS |
+| T9-R04 | — | — | 2026-09-25 13:59:59 – 14:02:02 | PASS |
+| T9-R05 | — | — | 2026-09-25 14:02:24 – 14:04:27 | PASS |
+| T10-R01 | variant a | 198.51.100.77 | 2026-09-25 14:05:23 – 14:05:41 | PASS |
+| T10-R02 | variant a | 198.51.100.77 | 2026-09-25 14:05:58 – 14:06:21 | PASS |
+| T10-R03 | variant a | 198.51.100.77 | 2026-09-25 14:06:32 – 14:06:51 | PASS |
+| T10-R04 | variant a | 198.51.100.77 | 2026-09-25 14:07:06 – 14:07:31 | PASS |
+| T10-R05 | variant a | 198.51.100.77 | 2026-09-25 14:07:40 – 14:08:01 | PASS |
+| T10-R06 | variant b | 198.51.100.77 | 2026-09-25 14:08:14 – 14:08:31 | PASS |
+| T10-R07 | variant b | 198.51.100.77 | 2026-09-25 14:08:49 – 14:09:11 | PASS |
+| T10-R08 | variant b | 198.51.100.77 | 2026-09-25 14:09:23 – 14:09:41 | PASS |
+| T10-R09 | variant b | 198.51.100.77 | 2026-09-25 14:09:57 – 14:10:21 | PASS |
+| T10-R10 | variant b | 198.51.100.77 | 2026-09-25 14:10:32 – 14:10:51 | PASS |
+| T11-R01 | Set A | 198.51.100.77 | 2026-09-25 14:12:48 – 14:18:08 | PASS |
+| T11-R02 | Set B | 198.51.100.77 | 2026-09-25 14:18:18 – 14:23:38 | PASS |
+| T11-R03 | Set C | 198.51.100.77 | 2026-09-25 14:23:48 – 14:29:07 | PASS |
+
+- T1–T10 ใช้ Weight Set A ทุก run ส่วน T11-R01/R02/R03 ใช้ Set A/B/C
+- source `198.51.100.77` เป็น TEST-NET-2 (RFC 5737) และ `192.168.2.10` เป็น IP ของ test host ที่เพิ่มใน allowlist ชั่วคราวช่วง T5
+- T1, T8 และ T9 ไม่มี source IP เพราะไม่ได้ inject alert (T1 สังเกตทราฟฟิกปกติ, T8/T9 เป็น fault injection)
+- run ที่มี alert จริงจากเครือข่ายปนอยู่ 1 แถว (ไม่นับในผล): T4-R03, T7-R03, T11-R01
+- หลักฐานของแต่ละ run อยู่ที่ `docs/evidence/<test>/<Rnn>/` เช่น `docs/evidence/T4/R01/`
+
+## ภาคผนวก ค Commit และ Implementation Revision
+
+### ค.1 Revision ที่ใช้ในการทดลอง
+
+| ช่วง | runs | revision | ความหมาย |
+|---|---|---|---|
+| T1–T10 | 55 | `236ce70` | จุด freeze ของการทดลอง (`docs: lock experiment run identity mapping`, 24 ก.ย. 2026) |
+| T11 | 3 | `d0a346d` | แก้การส่ง `risk.weight_set` จากไฟล์ตั้งค่าเข้า pipeline (`fix: pass configured risk.weight_set to pipeline`, 25 ก.ย. 2026) |
+
+ผลการทดสอบซอฟต์แวร์ที่ revision `d0a346d`: 828 passed, 10 skipped (skip = integration test ที่ต้องต่อ pfSense จริง)
+
+### ค.2 ลำดับ commit ที่เกี่ยวข้องกับการทดลองและรายงาน
+
+| commit | วันที่ | ข้อความ commit | ประเภท |
+|---|---|---|---|
+| `073f198` | 2026-09-24 | feat: record FR-15 timestamps in runtime engine | code (ก่อน freeze) |
+| `f702b5d` | 2026-09-24 | test: standardize experiment run identity | code (ก่อน freeze) |
+| `236ce70` | 2026-09-24 | docs: lock experiment run identity mapping | **freeze ของ T1–T10** |
+| `d0a346d` | 2026-09-25 | fix: pass configured risk.weight_set to pipeline | **revision ของ T11** |
+| `8d31ae7` | 2026-09-25 | docs: add STEP 11 final dataset evidence (T1-T11, 58 runs) | **freeze ของชุดข้อมูล** |
+| `cd54517` | 2026-09-25 | docs: add STEP 11 results tables, findings and limitations | ผลการทดลอง (ร่าง) |
+| `08af03d` | 2026-09-25 | docs: add STEP 11 report chapter (results, objectives, discussion, conclusion) | ร่างบทผล (ไม่รวมในเล่ม) |
+| `323bc8b` | 2026-09-25 | docs: mark O7 partial (read-back only) and drop M7 percentage | ร่างบทผล |
+| `a5c0d81` | 2026-09-25 | docs: add report outline with per-chapter sources and locked wording | รายงาน |
+| `b8071ca` | 2026-09-25 | docs: add report chapter 1 (introduction) | รายงาน |
+| `aa6e2db` | 2026-09-25 | docs: add report chapter 2 (theory and related work) with verified references | รายงาน |
+| `9fe210d` | 2026-09-25 | docs: pin chapter 2 references to lab versions (Suricata 7.0.8, FreeBSD 14.0) | รายงาน |
+| `397f5f3` | 2026-09-25 | docs: add report chapter 3 (system design) from current code and config | รายงาน |
+| `eaa006a` | 2026-09-25 | docs: add report chapter 4 (implementation) from current code | รายงาน |
+| `5fb5796` | 2026-09-26 | docs: add report chapter 5 experiment methodology | รายงาน |
+| `1635c96` | 2026-09-26 | docs: add report chapter 6 results and discussion | รายงาน |
+| `c11aff3` | 2026-09-26 | docs: correct T9 SSH warning field attribution | แก้ถ้อยคำเอกสาร (ภาคผนวก ก.3) |
+| `d85f528` | 2026-09-26 | docs: add report chapter 7 conclusion and recommendations | รายงาน |
+| `6f75145` | 2026-09-26 | docs: correct T9 note field attribution | แก้ถ้อยคำเอกสาร (ภาคผนวก ก.3) |
+
+หลัง `d0a346d` ไม่มี commit ใดแก้ source code ของ engine commit ถัดจากนั้นทั้งหมดเป็นเอกสาร หลักฐาน และรายงาน

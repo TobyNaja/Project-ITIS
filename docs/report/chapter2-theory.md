@@ -17,7 +17,8 @@ Detect, Respond และ Recover คือรับผลการตรวจ�
 
 Firewall ทำหน้าที่ควบคุมทราฟฟิกระหว่างเครือข่ายตามกฎที่กำหนด pfSense เป็น "a free open source customized distribution
 of FreeBSD tailored for use as a firewall and router entirely managed by an easy-to-use web interface" [1] โดยใช้ pf
-(packet filter) ของ FreeBSD เป็นกลไกกรองแพ็กเก็ต
+(packet filter) ของ FreeBSD เป็นกลไกกรองแพ็กเก็ต (pfSense CE 2.7.2 ที่ใช้ในห้องปฏิบัติการสร้างบน FreeBSD 14.0-CURRENT
+รายงานนี้จึงอ้างคู่มือ pf ของ FreeBSD 14.0 [3])
 
 กลไกที่เกี่ยวข้องโดยตรงกับโครงงานคือ **table** ของ pf ซึ่งเป็น "named structures which can hold a collection of addresses and
 networks" และการค้นหาใน table "are relatively fast, making a single rule with tables much more efficient ... than a large number
@@ -175,13 +176,11 @@ JSON (Suricata/EVE), การเชื่อมโยง alert ตามแห�
 
 ## เอกสารอ้างอิง (บทที่ 2)
 
-รูปแบบ: IEEE · URL ตรวจเมื่อ 2026-09-25 · DOI ตรวจกับ Crossref แล้ว · เอกสาร Suricata อ้างตาม version ที่ใช้ใน lab (7.0.8) และตรวจว่าข้อความที่ยกมามีอยู่ใน version นั้น
-
-[1] Netgate, "pfSense® software documentation: Introduction." [Online]. Available: https://docs.netgate.com/pfsense/en/latest/general/index.html (Netgate เผยแพร่เอกสารฉบับเดียวไม่แยกตาม version · lab ใช้ pfSense CE 2.7.2)
+[1] Netgate, "pfSense® software documentation: Introduction." [Online]. Available: https://docs.netgate.com/pfsense/en/latest/general/index.html
 
 [2] Netgate, "Alias Features and Limitations," pfSense® software documentation. [Online]. Available: https://docs.netgate.com/pfsense/en/latest/firewall/aliases-features.html
 
-[3] The FreeBSD Project, "pf.conf(5) — packet filter configuration file," FreeBSD 14.0-RELEASE Manual Pages. [Online]. Available: https://man.freebsd.org/cgi/man.cgi?query=pf.conf&sektion=5&manpath=FreeBSD+14.0-RELEASE (pfSense 2.7 สร้างบน FreeBSD 14-CURRENT จึงอ้าง 14.0-RELEASE ซึ่งใกล้ที่สุด)
+[3] The FreeBSD Project, "pf.conf(5) — packet filter configuration file," FreeBSD 14.0-RELEASE Manual Pages. [Online]. Available: https://man.freebsd.org/cgi/man.cgi?query=pf.conf&sektion=5&manpath=FreeBSD+14.0-RELEASE
 
 [4] Open Information Security Foundation, "What is Suricata," Suricata User Guide, ver. 7.0.8. [Online]. Available: https://docs.suricata.io/en/suricata-7.0.8/what-is-suricata.html
 
@@ -208,3 +207,7 @@ JSON (Suricata/EVE), การเชื่อมโยง alert ตามแห�
 [15] A. Shameli-Sendi, M. Cheriet, and A. Hamou-Lhadj, "Taxonomy of intrusion risk assessment and response system," *Computers & Security*, vol. 45, pp. 1–16, 2014, doi: 10.1016/j.cose.2014.04.009.
 
 [16] Z. Inayat, A. Gani, N. B. Anuar, M. K. Khan, and S. Anwar, "Intrusion response systems: Foundations, design, and challenges," *Journal of Network and Computer Applications*, vol. 62, pp. 53–74, 2016, doi: 10.1016/j.jnca.2015.12.006.
+
+[17] J. Arkko, M. Cotton, and L. Vegoda, "IPv4 Address Blocks Reserved for Documentation," RFC 5737, Jan. 2010, doi: 10.17487/RFC5737.
+
+[18] Project ITIS, "Project ITIS — Master Project Blueprint & Implementation Guide," internal project document, 2026.

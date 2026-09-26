@@ -8,7 +8,8 @@ engine ทำงานตามลำดับ ingestion → correlation → ris
 ที่ยกเลิกการปิดกั้นเมื่อครบ 300 s นอกจากนี้มีเส้นทางคู่ขนานที่ตรวจสุขภาพเชิงฟังก์ชันของ Suricata และกู้คืนได้ไม่เกิน 3 ครั้ง
 
 ระบบถูกทดลองในห้องปฏิบัติการเสมือน (pfSense CE 2.7.2 และ Suricata 7.0.8 บน GNS3/VMware) ตามสถานการณ์ T1–T11 ของ Blueprint รวม
-58 runs ชุดข้อมูลหลักใช้ controlled EVE injection ส่วน T8 และ T9 ใช้ fault injection ชุดข้อมูลผ่าน validation และถูก freeze ก่อนวิเคราะห์ ส่วนประกอบที่อยู่ใน
+58 runs (ภาคผนวก ข) ชุดข้อมูลหลักใช้ controlled EVE injection ส่วน T8 และ T9 ใช้ fault injection ชุดข้อมูลผ่าน validation และถูก freeze
+ก่อนวิเคราะห์ (ภาคผนวก ก) ส่วนประกอบที่อยู่ใน
 การออกแบบแต่ไม่ได้ติดตั้งคือ Prometheus และ Grafana
 
 ## 7.2 คำตอบของคำถามวิจัย
@@ -44,6 +45,8 @@ Risk assessment provides a weighted assessment of the correlated pattern, while 
 according to predefined conditions.
 
 ## 7.3 สรุปผลตามวัตถุประสงค์
+
+ตาราง 7.1 สรุปสถานะของวัตถุประสงค์ทั้ง 11 ข้อ
 
 **ตาราง 7.1** สรุปผลตามวัตถุประสงค์ (รายละเอียดในตาราง 6.8)
 

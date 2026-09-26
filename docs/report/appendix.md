@@ -54,7 +54,8 @@ SHA-256 ของฐานข้อมูลหลังการแก้ไข
 
 ### ก.4 การตรวจซ้ำ
 
-ค่าทั้งหมดในบทที่ 6 คำนวณซ้ำได้จากฐานข้อมูลในหัวข้อ ก.1 และ registry ในภาคผนวก ข โดยผูกแถวในฐานข้อมูลกับ run ด้วยช่วงเวลาที่ engine ทำงาน
+ค่าทั้งหมดในบทที่ 6 ตรวจสอบย้อนได้จากฐานข้อมูลในหัวข้อ ก.1 และ registry ในภาคผนวก ข ตามวิธีการที่อธิบาย โดยสคริปต์สำหรับการวิเคราะห์
+(validation, metrics และรูปที่ 6.1) ไม่ได้รวมอยู่ใน repository วิธีการคือผูกแถวในฐานข้อมูลกับ run ด้วยช่วงเวลาที่ engine ทำงาน
 และผูก `experiment_timestamps` ด้วย `notes` ที่ขึ้นต้นด้วย `run=<run_id>;` สถิติ latency ใช้ sample standard deviation (n − 1)
 
 ## ภาคผนวก ข Test Run และ Evidence Registry
@@ -143,28 +144,18 @@ registry และ results CSV เป็น**หลักฐานประก�
 
 ผลการทดสอบซอฟต์แวร์ที่ revision `d0a346d`: 828 passed, 10 skipped (skip = integration test ที่ต้องต่อ pfSense จริง)
 
-### ค.2 ลำดับ commit ที่เกี่ยวข้องกับการทดลองและรายงาน
+### ค.2 commit ที่เกี่ยวกับ implementation ชุดข้อมูล และการแก้ไขหลักฐาน
 
-| commit | วันที่ | ข้อความ commit | ประเภท |
+| commit | วันที่ | ข้อความ commit | ความเกี่ยวข้อง |
 |---|---|---|---|
-| `073f198` | 2026-09-24 | feat: record FR-15 timestamps in runtime engine | code (ก่อน freeze) |
-| `f702b5d` | 2026-09-24 | test: standardize experiment run identity | code (ก่อน freeze) |
+| `073f198` | 2026-09-24 | feat: record FR-15 timestamps in runtime engine | implementation: บันทึก `experiment_timestamps` |
+| `f702b5d` | 2026-09-24 | test: standardize experiment run identity | implementation: รูปแบบ run_id |
 | `236ce70` | 2026-09-24 | docs: lock experiment run identity mapping | **freeze ของ T1–T10** |
 | `d0a346d` | 2026-09-25 | fix: pass configured risk.weight_set to pipeline | **revision ของ T11** |
-| `8d31ae7` | 2026-09-25 | docs: add STEP 11 final dataset evidence (T1-T11, 58 runs) | **freeze ของชุดข้อมูล** |
-| `cd54517` | 2026-09-25 | docs: add STEP 11 results tables, findings and limitations | ผลการทดลอง (ร่าง) |
-| `08af03d` | 2026-09-25 | docs: add STEP 11 report chapter (results, objectives, discussion, conclusion) | ร่างบทผล (ไม่รวมในเล่ม) |
-| `323bc8b` | 2026-09-25 | docs: mark O7 partial (read-back only) and drop M7 percentage | ร่างบทผล |
-| `a5c0d81` | 2026-09-25 | docs: add report outline with per-chapter sources and locked wording | รายงาน |
-| `b8071ca` | 2026-09-25 | docs: add report chapter 1 (introduction) | รายงาน |
-| `aa6e2db` | 2026-09-25 | docs: add report chapter 2 (theory and related work) with verified references | รายงาน |
-| `9fe210d` | 2026-09-25 | docs: pin chapter 2 references to lab versions (Suricata 7.0.8, FreeBSD 14.0) | รายงาน |
-| `397f5f3` | 2026-09-25 | docs: add report chapter 3 (system design) from current code and config | รายงาน |
-| `eaa006a` | 2026-09-25 | docs: add report chapter 4 (implementation) from current code | รายงาน |
-| `5fb5796` | 2026-09-26 | docs: add report chapter 5 experiment methodology | รายงาน |
-| `1635c96` | 2026-09-26 | docs: add report chapter 6 results and discussion | รายงาน |
-| `c11aff3` | 2026-09-26 | docs: correct T9 SSH warning field attribution | แก้ถ้อยคำเอกสาร (ภาคผนวก ก.3) |
-| `d85f528` | 2026-09-26 | docs: add report chapter 7 conclusion and recommendations | รายงาน |
-| `6f75145` | 2026-09-26 | docs: correct T9 note field attribution | แก้ถ้อยคำเอกสาร (ภาคผนวก ก.3) |
+| `8d31ae7` | 2026-09-25 | docs: add STEP 11 final dataset evidence (T1-T11, 58 runs) | **freeze ของชุดข้อมูลและหลักฐาน** |
+| `c11aff3` | 2026-09-26 | docs: correct T9 SSH warning field attribution | แก้ถ้อยคำหลักฐาน (ภาคผนวก ก.3) |
+| `6f75145` | 2026-09-26 | docs: correct T9 note field attribution | แก้ถ้อยคำหลักฐาน (ภาคผนวก ก.3) |
+
+commit ที่เป็นการเขียนรายงาน (บทที่ 1–7 และภาคผนวก) ไม่แสดงในตารางนี้ เพราะไม่เปลี่ยน implementation หรือชุดข้อมูล
 
 หลัง `d0a346d` ไม่มี commit ใดแก้ source code ของ engine commit ถัดจากนั้นทั้งหมดเป็นเอกสาร หลักฐาน และรายงาน

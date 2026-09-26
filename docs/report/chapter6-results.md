@@ -2,9 +2,11 @@
 
 บทนี้รายงานผลของการทดลองตามวิธีในบทที่ 5 ทุกตัวเลขมาจากชุดข้อมูลที่ freeze แล้ว หลังการ freeze ไม่มีการรันซ้ำ และไม่มีการเปลี่ยนแปลงฐานข้อมูล ผลการทดลอง timestamp
 หรือค่าที่ใช้คำนวณ metrics (การแก้ไขถ้อยคำในเอกสารประกอบภายหลัง freeze อยู่ในหัวข้อ 5.8.3)
-T1–T10 รันบน revision `236ce70` ส่วน T11 รันบน `d0a346d` (หัวข้อ 5.3.5)
+T1–T10 รันบน revision `236ce70` ส่วน T11 รันบน `d0a346d` (หัวข้อ 5.3.5 และภาคผนวก ค) ข้อมูลของฐานข้อมูลที่ freeze อยู่ในภาคผนวก ก
 
 ## 6.1 ผลการทดสอบเชิงฟังก์ชัน (T1–T11)
+
+ตาราง 6.1 สรุปผลของแต่ละ test เทียบกับ expected ผลราย run อยู่ในภาคผนวก ข
 
 **ตาราง 6.1** ผลการทดสอบ T1–T11 (58 runs)
 
@@ -33,6 +35,8 @@ T1–T10 ได้ผลตาม expected ครบ 55/55 runs ส่วน T11
 
 ## 6.2 ผลการวัด Latency (M1–M4)
 
+ตาราง 6.2 แสดงสถิติของ M1–M4 ในกลุ่มหลักตามที่กำหนดในหัวข้อ 5.7
+
 **ตาราง 6.2** Latency ของกลุ่มหลัก (ms) — ทุกค่าใช้นาฬิกา SEC01 ทั้งสองปลาย
 
 | Metric | นิยาม | กลุ่ม | n | Mean | Median | Min–Max | SD |
@@ -48,6 +52,8 @@ T1–T10 ได้ผลตาม expected ครบ 55/55 runs ส่วน T11
 - **M3** ส่วน `t_block_verified − t_block_cmd` คือ command + verification รวมกัน เพราะ implementation สั่ง block และอ่านกลับในการเรียกครั้งเดียว
   **ค่านี้ไม่ใช่ pure command latency** ส่วนช่วงก่อนเรียก block รวมการบันทึก pattern, risk และ decision ลงฐานข้อมูล
 - **M2** ทุก run ในกลุ่มหลักต่ำกว่าเป้าหมายเบื้องต้นของ Blueprint (< 1 s ในห้องปฏิบัติการ) ภายใต้ภาระงานที่ทดสอบ
+
+ค่าเฉลี่ยของ latency แยกตาม test แสดงในตาราง 6.3
 
 **ตาราง 6.3** Latency แยกตาม test (mean, ms)
 
@@ -69,6 +75,8 @@ T1–T10 ได้ผลตาม expected ครบ 55/55 runs ส่วน T11
 
 ## 6.3 ผลด้านความสำเร็จและความปลอดภัย (M5–M10)
 
+ตาราง 6.4 แสดงผลของ M5–M10
+
 **ตาราง 6.4** ผลของ M5–M10
 
 | Metric | ขอบเขต | ผล | สิ่งที่นับ |
@@ -88,7 +96,9 @@ M5 เป็น detection success rate under the defined laboratory test scenari
 
 ### 6.3.1 Recovery Failure Handling (T9)
 
-**ตาราง 6.5** ผลของ T9 (รายงานแยกจาก M10)
+ผลของ T9 รายงานแยกจาก M10 ในตาราง 6.5
+
+**ตาราง 6.5** ผลของ T9 (รายงานแยกจาก M10 · ครอบคลุม M12)
 
 | รายการ | ผล |
 |---|---|
@@ -103,6 +113,8 @@ M5 เป็น detection success rate under the defined laboratory test scenari
 
 ### 6.3.2 Recovery Time ของ T8 (supplementary measurement)
 
+ตาราง 6.6 แสดงเวลาตั้งแต่สั่งหยุด Suricata จนบันทึกการกู้คืนสำเร็จใน T8
+
 **ตาราง 6.6** เวลากู้คืนใน T8 (ms)
 
 | การวัด | n | Mean | Median | Min–Max | SD |
@@ -114,6 +126,8 @@ M5 เป็น detection success rate under the defined laboratory test scenari
 รายงานนี้จึงใช้ค่านี้เป็น supplementary measurement และถือว่า M11 ตามนิยามไม่ได้วัด (หัวข้อ 6.8.2)
 
 ## 6.4 Sensitivity Analysis (T11)
+
+ตาราง 6.7 แสดงคะแนน ระดับความเสี่ยง และ action ของ weight set ทั้งสามชุด
 
 **ตาราง 6.7** ผลของ weight set ต่อ pattern เดียวกัน (5 × HIGH ภายใน 10 s, source ภายนอก)
 
@@ -219,7 +233,7 @@ input เป็น controlled injection จาก source เดียว (TEST-N
 
 **Risk Model** — The proposed risk scoring model is a rule-based weighted model developed for the controlled experimental
 environment. The weights and normalization mappings are experimental design parameters and are not claimed to represent a
-universal industry standard. (แนวคิดของแบบจำลองอ้างอิง CVSS v4.0 สำหรับ severity และ NIST incident handling สำหรับการตอบสนอง แต่ไม่ใช่คะแนน
+universal industry standard. (แนวคิดของแบบจำลองอ้างอิง CVSS v4.0 [8] สำหรับ severity และ NIST incident handling [9], [10] สำหรับการตอบสนอง แต่ไม่ใช่คะแนน
 มาตรฐานสากลโดยตรง)
 
 **Detection** — Detection capability depends on the configured Suricata rules and therefore does not represent detection of all
@@ -275,7 +289,7 @@ orchestration or high-availability architecture.
 
 ### 6.8.3 ความแตกต่างจากแผนการทดลอง (experimental deviations)
 
-รายการต่อไปนี้บันทึกไว้ในบทที่ 5 และมีผลต่อการตีความ จึงรวบรวมไว้ที่นี่ด้วย
+รายการในตาราง 6.10 บันทึกไว้ในบทที่ 5 และมีผลต่อการตีความ จึงรวบรวมไว้ที่นี่ด้วย
 
 **ตาราง 6.10** ความแตกต่างระหว่างแผนการทดลองกับสิ่งที่ทำจริง
 

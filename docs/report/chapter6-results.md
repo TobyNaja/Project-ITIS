@@ -25,7 +25,7 @@ T1–T10 รันบน revision `236ce70` ส่วน T11 รันบน `d0
 | T10b | 4 × HIGH ภายใน 10 s | MONITOR · ไม่มี block | บันทึก event 4 แถว (น้อยกว่า min_events = 5) · ไม่มี decision/action · pf table ว่าง | 5 | 5/5 PASS |
 | T11 | 5 × HIGH · Set A/B/C | score เปลี่ยนตาม weight set | ดูหัวข้อ 6.4 · RULE-001 BLOCK VERIFIED ทุกชุด | 3 | บันทึกครบ 3/3 |
 
-T1–T10 ได้ผลตาม expected ครบ 55/55 runs ส่วน T11 เป็น sensitivity analysis จึงไม่ตัดสิน pass/fail
+T1–T10 ให้ผลตรงตามเกณฑ์ที่กำหนดไว้ครบ 55/55 runs ส่วน T11 เป็น sensitivity analysis จึงไม่ตัดสิน pass/fail
 
 หมายเหตุ
 

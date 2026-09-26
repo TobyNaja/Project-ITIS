@@ -7,7 +7,7 @@
 
 | รายการ | ค่า |
 |---|---|
-| ภาษา | Python 3 (ทดสอบบน 3.14) |
+| ภาษา | Python 3 (tested on Python 3.14.5) |
 | runtime dependency | PyYAML เท่านั้น (อื่น ๆ ใช้ standard library: `sqlite3`, `subprocess`, `threading`, `ipaddress`, `logging`) |
 | dependency สำหรับพัฒนา/วิเคราะห์ | pytest, matplotlib (ไม่ใช่ส่วนของ engine) |
 | การเชื่อมต่อ pfSense | OpenSSH client (`ssh -T -o BatchMode=yes`) ด้วย key-based authentication |

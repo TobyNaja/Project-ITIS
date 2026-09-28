@@ -33,3 +33,7 @@ data/*.db-shm
 Thumbs.db
 .vscode/
 .idea/
+
+# Report deliverables with personal info (name / student ID) — keep local only
+docs/report/short/
+docs/report/dist/

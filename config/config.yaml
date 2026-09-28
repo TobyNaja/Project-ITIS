@@ -1,0 +1,36 @@
+# config/config.yaml — ITIS system configuration (NFR-01: ห้าม hardcode ค่าระบบ)
+#
+# ค่าเฉพาะเครื่อง/ความลับ ไม่อยู่ในไฟล์นี้ (NFR-07):
+#   ITIS_PFSENSE_HOST  = environment variable (required ตอนรันจริง)
+#   ITIS_EVE_PATH      = environment variable (optional — override eve.path ด้านล่าง)
+
+system:
+  db_path: "data/step11_experiment.db"
+  log_path: "logs/engine.log"
+  log_level: "INFO"               # NFR-03: DEBUG/INFO/WARNING/ERROR/CRITICAL
+
+eve:
+  path: ""                        # เว้นว่างได้ — ตั้งที่นี่หรือ override ด้วย ITIS_EVE_PATH
+
+correlation:
+  window_sec: 10                  # §3.5 / FR-03
+  min_events: 5
+
+block:
+  duration_sec: 300               # §3.6 RULE-001 block_duration_sec
+
+health:
+  check_interval_sec: 15          # FR-12: ความถี่ที่ HealthMonitor ตรวจ
+  stats_interval_sec: 10          # ความถี่ที่คาดว่า Suricata เขียน stats (ค่าของ lab)
+  stats_freshness_multiplier: 3   # FR-12: stats ใหม่ภายใน stats_interval × N (=30s)
+  restart_wait_sec: 5             # รอหลัง restart ก่อน functional check (bounded)
+  restart_command: "/usr/local/etc/rc.d/suricata.sh restart"
+                                  # คำสั่ง restart Suricata บน pfSense (รันผ่าน SSH) —
+                                  # ยืนยันกับเครื่องจริงแล้ว 2026-09-23: exit 0 + PID เปลี่ยน
+                                  # + stats กลับมาทุก 10s · ว่างไว้ = restart ล้มเหลวเสมอ
+
+recovery:
+  max_attempts: 3                 # FR-13: retry สูงสุด 3 ครั้ง
+
+risk:
+  weight_set: "A"                 # §3.5 Weight Set A/B/C

@@ -1,6 +1,8 @@
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
+from security_engine.models import CorrelationPattern
+
 
 class CorrelationEngine:
     """
@@ -93,13 +95,19 @@ class CorrelationEngine:
 
         self.last_alert[src_ip] = timestamp
 
-        events = [item[1] for item in bucket]
+        events = tuple(item[1] for item in bucket)
 
-        return {
-            "src_ip": src_ip,
-            "event_count": len(events),
-            "window_seconds": (
-                timestamp - bucket[0][0]
-            ).total_seconds(),
-            "events": events,
-        }
+        # max_severity = severity ที่รุนแรงที่สุด (Suricata เลขน้อย = รุนแรงกว่า)
+        severities = [
+            e.get("severity") for e in events
+            if isinstance(e, dict) and e.get("severity") is not None
+        ]
+
+        return CorrelationPattern(
+            src_ip=src_ip,
+            window_start=bucket[0][0],
+            window_end=timestamp,
+            event_count=len(events),
+            max_severity=min(severities) if severities else None,
+            events=events,
+        )

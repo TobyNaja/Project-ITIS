@@ -3,7 +3,7 @@ tests/test_block_lifecycle_integration.py — Phase 9.2d
 
 Real integration: BlockLifecycleManager + PFSenseEnforcer จริง + pfSense จริง
 พิสูจน์ lifecycle เต็ม: Decision(BLOCK) → add ที่ pfSense → ACTIVE → หมดอายุ →
-expire_due() → remove ที่ pfSense → UNBLOCKED → IP หายจาก table จริง
+expire_due() → remove ที่ pfSense → EXPIRED → IP หายจาก table จริง
 
 *** ไม่รันโดย default *** — ต้องตั้ง env:
     PowerShell:
@@ -83,11 +83,11 @@ def test_full_lifecycle_with_clock_advance(setup):
     assert enforcer.is_blocked(TEST_IP)                  # ยัง block อยู่
     assert store.get_block(TEST_IP)["status"] == "ACTIVE"
 
-    # 3) เลยหมดอายุ -> expire_due -> remove จาก pfSense จริง + UNBLOCKED
+    # 3) เลยหมดอายุ -> expire_due -> remove จาก pfSense จริง + EXPIRED
     clock.advance(250)                                   # รวม 350 > 300
     mgr.expire_due()
     assert not enforcer.is_blocked(TEST_IP)              # หายจาก table จริง
-    assert store.get_block(TEST_IP)["status"] == "UNBLOCKED"
+    assert store.get_block(TEST_IP)["status"] == "EXPIRED"
 
 
 def test_full_lifecycle_real_time_short_duration(setup):
@@ -106,7 +106,7 @@ def test_full_lifecycle_real_time_short_duration(setup):
     time.sleep(6)                                        # รอเลย 5s
     mgr.expire_due()
     assert not enforcer.is_blocked(TEST_IP)              # auto-unblock จริง
-    assert store.get_block(TEST_IP)["status"] == "UNBLOCKED"
+    assert store.get_block(TEST_IP)["status"] == "EXPIRED"
 
 
 def test_reconcile_after_restart_real(setup):
@@ -128,4 +128,4 @@ def test_reconcile_after_restart_real(setup):
     mgr2.reconcile()
 
     assert not enforcer.is_blocked(TEST_IP)              # ปลดจาก pfSense จริง
-    assert store2.get_block(TEST_IP)["status"] == "UNBLOCKED"
+    assert store2.get_block(TEST_IP)["status"] == "EXPIRED"

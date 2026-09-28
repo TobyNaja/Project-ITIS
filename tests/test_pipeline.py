@@ -11,6 +11,7 @@ from security_engine.pipeline import SecurityPipeline
 from security_engine.policy.rule_engine import (
     RuleEngine, BLOCK, ALERT, MONITOR, NO_AUTO_BLOCK,
 )
+from security_engine.policy.rules_config import load_rules
 
 SRC = "192.168.2.10"
 
@@ -53,7 +54,7 @@ class FakeLifecycle:
 
 def make_pipeline(match, allowlist=None, block_ok=True):
     corr = FakeCorrelator(match)
-    rule = RuleEngine(allowlist=allowlist or set(), min_events=5, max_window=10.0)
+    rule = RuleEngine(load_rules(), allowlist=allowlist or set())
     life = FakeLifecycle(block_ok=block_ok)
     return SecurityPipeline(corr, rule, life, min_events=5, window_max=10.0), life
 
@@ -70,8 +71,8 @@ def test_no_match_decision_none(self=None):
 
 # ---- BLOCK ----
 def test_block_flows_to_lifecycle():
-    # HIGH: sev2 + 3A/2B + 4.2s -> R65.6 -> HIGH -> BLOCK
-    match = make_match(2, ["a", "a", "a", "b", "b"], count=5, window=4.2)
+    # RULE-001: raw severity 1 (HIGH) + 5 events + 4.2s -> BLOCK
+    match = make_match(1, ["a", "a", "a", "b", "b"], count=5, window=4.2)
     pipe, life = make_pipeline(match)
     tr = pipe.process(event())
     assert tr["decision"] == BLOCK
@@ -86,7 +87,7 @@ def test_block_flows_to_lifecycle():
 
 def test_block_verify_fail_no_t5():
     # block() คืน success=False -> t4 มี แต่ t5 ไม่มี
-    match = make_match(2, ["a", "a", "a", "b", "b"], count=5, window=4.2)
+    match = make_match(1, ["a", "a", "a", "b", "b"], count=5, window=4.2)
     pipe, life = make_pipeline(match, block_ok=False)
     tr = pipe.process(event())
     assert tr["decision"] == BLOCK
@@ -96,8 +97,8 @@ def test_block_verify_fail_no_t5():
 
 # ---- ALERT ----
 def test_alert_does_not_enforce():
-    # MEDIUM: sev3 + 5 dest + 5.0s -> R48 -> MEDIUM -> ALERT
-    match = make_match(3, ["a", "b", "c", "d", "e"], count=5, window=5.0)
+    # RULE-002: raw severity 2 (MEDIUM) + 5 events + 5.0s -> ALERT
+    match = make_match(2, ["a", "b", "c", "d", "e"], count=5, window=5.0)
     pipe, life = make_pipeline(match)
     tr = pipe.process(event())
     assert tr["decision"] == ALERT

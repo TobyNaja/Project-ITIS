@@ -18,8 +18,11 @@ pfSense control:
   verify  : pfctl -t <table> -T show
 """
 import ipaddress
+import logging
 import subprocess
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 
 class EnforcementError(Exception):
@@ -77,9 +80,18 @@ class PFSenseEnforcer:
                 argv, capture_output=True, text=True, timeout=self.timeout,
             )
         except subprocess.TimeoutExpired:
+            log.error("SSH timeout %ss ไปยัง %s: %s", self.timeout, self.host, argv[-1])
             raise EnforcementError(f"SSH timeout to {self.host}")
         except FileNotFoundError:
+            log.error("ไม่พบคำสั่ง ssh บนเครื่องนี้ — enforcement ทำงานไม่ได้")
             raise EnforcementError("ssh binary not found")
+        except OSError as exc:
+            log.error("เรียก ssh ไม่สำเร็จ (%s): %s", self.host, exc)
+            raise EnforcementError(f"ssh failed: {exc}") from exc
+
+        if proc.returncode != 0:
+            log.warning("pfctl ที่ %s คืน rc=%s: %.200s",
+                        self.host, proc.returncode, (proc.stderr or "").strip())
         return proc.returncode, proc.stdout
 
     # ---- read-back ----

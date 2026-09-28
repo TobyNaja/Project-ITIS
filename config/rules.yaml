@@ -1,0 +1,40 @@
+# config/rules.yaml — Decision Rules ตาม Blueprint §3.6 (ล็อกแล้ว)
+#
+# ไฟล์นี้คือ source of truth ของการตัดสินใจ — RuleEngine โหลดจากที่นี่เท่านั้น
+# priority น้อย = ประเมินก่อน, first match wins, ไม่ match = default_action
+#
+# condition ที่รองรับ (declarative — ไม่มี expression/eval):
+#   min_severity          ชื่อ severity ขั้นต่ำ: CRITICAL/HIGH/MEDIUM/LOW
+#                         (Suricata เลขน้อย = รุนแรงกว่า -> HIGH คือ severity <= 1)
+#   min_same_src_events   จำนวน event ขั้นต่ำของ source เดียวกันใน pattern
+#   max_time_window_sec   ระยะเวลาของ pattern ต้องไม่เกินค่านี้
+#   source_in_allowlist   true/false
+#
+# *** ห้ามใช้ risk_level เป็น condition *** (§3.5: risk level ใช้เพื่อ dashboard/report)
+
+rules:
+  - id: "RULE-003"                # ประเมินก่อนเสมอ (highest priority)
+    priority: 1
+    condition:
+      source_in_allowlist: true
+    action: "NO_AUTO_BLOCK"       # + ALERT + AUDIT, risk score คงเดิม
+
+  - id: "RULE-001"
+    priority: 2
+    condition:
+      min_severity: "HIGH"        # Suricata severity 1
+      min_same_src_events: 5
+      max_time_window_sec: 10
+      source_in_allowlist: false
+    action: "BLOCK"
+    block_duration_sec: 300
+
+  - id: "RULE-002"
+    priority: 3
+    condition:
+      min_severity: "MEDIUM"
+      min_same_src_events: 5
+      max_time_window_sec: 10
+    action: "ALERT"
+
+default_action: "MONITOR"

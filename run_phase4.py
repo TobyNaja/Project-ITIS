@@ -9,86 +9,226 @@ Correlation/Risk/Rule/Lifecycle อยู่ในนี้ (อยู่ใน 
     for event in stream_events(): pipeline.process(event)   [main thread]
     finally: runner.stop()                                    [shutdown สะอาด]
 
-รันจริงบน SEC01/คอมหลัก (ต่อ pfSense + Suricata) = Phase 12
+ค่าระบบทั้งหมดมาจาก config/config.yaml (NFR-01) ผ่าน security_engine.settings
+ส่วนค่าเฉพาะเครื่องมาจาก environment (NFR-07):
+    $env:ITIS_PFSENSE_HOST = "admin@..."          # required
+    $env:ITIS_EVE_PATH     = "/var/log/..."       # optional — override eve.path
 ไฟล์นี้แยก build_pipeline() ออกจาก main() เพื่อให้ wiring test ประกอบระบบได้
 โดยไม่ต้องรัน loop จริง
 """
+import argparse
+import logging
+import sys
 import threading
 
+from security_engine.logging_config import configure_from_settings
+from security_engine.settings import (          # re-export: ของเดิมที่อ้าง
+    ConfigError,                                # run_phase4.ConfigError /
+    ENV_EVE_PATH,                               # run_phase4.require_env ยังใช้ได้
+    ENV_PFSENSE_HOST,
+    load_settings,
+    require_env,
+)
 from security_engine.ingestion.eve_reader import stream_events
 from security_engine.correlation.engine import CorrelationEngine
 from security_engine.policy.rule_engine import RuleEngine
-from security_engine.policy.allowlist import load_allowlist
+from security_engine.policy.rules_config import load_rules
+from security_engine.policy.source_context import load_source_context
 from security_engine.enforcement.pfsense_enforcer import PFSenseEnforcer
 from security_engine.lifecycle.block_store import BlockStore
 from security_engine.lifecycle.block_lifecycle import BlockLifecycleManager
 from security_engine.lifecycle.runner import LifecycleRunner
+from security_engine.health.monitor import HealthMonitor
+from security_engine.health.recovery import RecoveryManager
+from security_engine.health.runner import HealthRunner
+from security_engine.health.suricata_controller import SuricataController
 from security_engine.pipeline import SecurityPipeline
+from security_engine.scoring.risk import DEFAULT_WEIGHT_SET
+from security_engine.storage.repository import AuditRepository
+from security_engine.experiment.timestamp_sink import (
+    ExperimentIdentityError,
+    ExperimentTimestampSink,
+    validate_identity,
+)
 
-# ---- config (Phase 11: hard-code default; ต่อไปย้ายเข้าไฟล์ config) ----
-PFSENSE_HOST = "admin@192.168.227.150"
-ALLOWLIST_PATH = "config/allowlist.txt"
+log = logging.getLogger(__name__)
+
+# ---- fallback default ของ build_pipeline (ค่าจริงตอนรันมาจาก config.yaml) ----
+# policy config: กฎมาจาก rules.yaml, allowlist มาจาก allowlist.yaml (NFR-01)
+# asset list (factor C) มาจาก assets.yaml — STEP 2B
+ALLOWLIST_PATH = "config/allowlist.yaml"
+ASSETS_PATH = "config/assets.yaml"
+RULES_PATH = "config/rules.yaml"
 DB_PATH = "data/security_engine.db"
 MIN_EVENTS = 5
 WINDOW_MAX = 10.0
-EXPIRE_INTERVAL = 1.0
+
+# block-expiry polling interval เป็น implementation-level scheduler parameter
+# ไม่ใช่ Blueprint experiment/configuration parameter จึงไม่อยู่ใน config.yaml
+# (ห้ามเอา health.check_interval_sec=15 มาใช้แทน — คนละความหมาย)
+EXPIRE_INTERVAL_SEC = 1.0
 
 
-def build_pipeline(*, host=PFSENSE_HOST, allowlist_path=ALLOWLIST_PATH,
+def build_pipeline(*, host=None, allowlist_path=ALLOWLIST_PATH,
+                   assets_path=ASSETS_PATH, rules_path=RULES_PATH,
                    db_path=DB_PATH, min_events=MIN_EVENTS,
-                   window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL,
-                   enforcer=None, correlator=None):
+                   window_max=WINDOW_MAX, expire_interval=EXPIRE_INTERVAL_SEC,
+                   enforcer=None, correlator=None, repository=None,
+                   trace_sink=None, weight_set=DEFAULT_WEIGHT_SET):
     """
     ประกอบ component ทั้งหมด -> คืน (pipeline, runner, shared_lock)
     เปิดให้ inject enforcer/correlator เพื่อ wiring test (ไม่ต้องต่อ pfSense จริง)
+
+    host=None + ไม่ inject enforcer -> อ่าน ITIS_PFSENSE_HOST จาก environment
+    (inject enforcer แล้ว host ไม่ถูกใช้เลย -> test ไม่ต้องตั้ง env)
+
+    repository=None -> สร้าง AuditRepository บน db_path เดียวกับ BlockStore
+    (audit chain §3.4 ต้องอยู่ไฟล์เดียวกับ active_blocks ถึงจะ join ได้)
     """
-    allowlist = load_allowlist(allowlist_path)
+    # allowlist ชุดเดียวกันไปทั้ง RuleEngine (RULE-003) และ resolver (factor C=0)
+    allowlist, source_context_resolver = load_source_context(allowlist_path, assets_path)
+    rules = load_rules(rules_path)
 
     # window_max ส่งเป็น float ตรงๆ — timedelta(seconds=...) รองรับ float
     # (ห้าม int() เพราะถ้า window_max=2.5 จะถูกตัดเหลือ 2 -> Correlation กับ Risk
     #  ใช้ window คนละค่า)
     correlator = correlator or CorrelationEngine(
         window_seconds=window_max, min_events=min_events)
-    rule_engine = RuleEngine(allowlist=allowlist,
-                             min_events=min_events, max_window=window_max)
-    enforcer = enforcer or PFSenseEnforcer(host)
+    # กฎทั้งหมดมาจาก rules.yaml — min_events/window_max เป็นของ CorrelationEngine
+    rule_engine = RuleEngine(rules, allowlist=allowlist)
+    enforcer = enforcer or PFSenseEnforcer(host or require_env(ENV_PFSENSE_HOST))
     store = BlockStore(db_path)
-    lifecycle = BlockLifecycleManager(enforcer, store)
+    repository = repository or AuditRepository(db_path)
+    # lifecycle บันทึก UNBLOCK action เอง (STEP 6D) ส่วน BLOCK action บันทึกที่ pipeline
+    lifecycle = BlockLifecycleManager(enforcer, store, repository=repository)
 
     # shared lock: Pipeline (block) + Runner (expire_due) ใช้ตัวเดียวกัน
     shared_lock = threading.Lock()
 
     pipeline = SecurityPipeline(correlator, rule_engine, lifecycle,
                                 lock=shared_lock,
-                                min_events=min_events, window_max=window_max)
-    runner = LifecycleRunner(lifecycle, shared_lock,
-                             interval=expire_interval,
-                             on_error=lambda e: print(f"[RUNNER ERROR] {e}", flush=True))
+                                min_events=min_events, window_max=window_max,
+                                source_context_resolver=source_context_resolver,
+                                weight_set=weight_set,
+                                repository=repository, trace_sink=trace_sink)
+    runner = LifecycleRunner(
+        lifecycle, shared_lock, interval=expire_interval,
+        # NFR-02: error ใน expire loop ต้องถูก log ไม่ใช่ตายเงียบ
+        on_error=lambda exc: log.error("lifecycle runner error: %s", exc, exc_info=exc))
     return pipeline, runner, shared_lock
 
 
-def run(pipeline, runner, event_source):
+def build_health(settings, *, host, repository=None, controller=None):
+    """ประกอบสาย health/recovery -> คืน (monitor, health_runner)
+
+    แยกจาก build_pipeline เพราะเป็นคนละ concern: pipeline ประมวลผล event
+    ส่วน health ดูว่า "ยังมี event เข้ามาไหม" — และต้องเดินได้แม้ pipeline เงียบ
+
+    monitor.on_stats ที่คืนมา ต้องถูกส่งเข้า stream_events(on_stats=...) ไม่งั้น
+    stats freshness จะไม่มีวันถูกต่ออายุ -> EVE_STALE ปลอมทุก 24 วินาที
     """
-    เดิน loop: start runner -> วน event -> shutdown สะอาดใน finally
+    controller = controller or SuricataController(
+        host, restart_command=settings.health.restart_command)
+    monitor = HealthMonitor(
+        controller,
+        stats_interval_sec=settings.health.stats_interval_sec,
+        stats_freshness_multiplier=settings.health.stats_freshness_multiplier)
+    recovery = RecoveryManager(
+        controller, monitor, repository=repository,
+        max_attempts=settings.recovery.max_attempts,
+        restart_wait_sec=settings.health.restart_wait_sec)
+    health_runner = HealthRunner(
+        monitor, recovery, interval=settings.health.check_interval_sec,
+        on_error=lambda exc: log.error("health runner error: %s", exc, exc_info=exc))
+    return monitor, health_runner
+
+
+def run(pipeline, runner, event_source, health_runner=None):
+    """
+    เดิน loop: reconcile -> start runner -> วน event -> shutdown สะอาดใน finally
     event_source = iterable ของ normalized event (production = stream_events())
+
+    health_runner=None -> รันโดยไม่มีสาย health (wiring test / โหมดทดลองเฉพาะ pipeline)
     """
+    # FR-10 Restart Resilience: อ่าน state จาก SQLite ก่อนเริ่มทำงาน
+    #   หมดอายุระหว่างที่ process ดับ -> ปลดทันที
+    #   REMOVE_FAILED ที่ค้าง        -> retry
+    #   ยังไม่หมดอายุ                -> คง ACTIVE ไว้ (timer เดินต่อด้วย runner)
+    # ต้องทำ *ก่อน* runner.start() เพื่อให้ state ถูกต้องตั้งแต่ tick แรก
+    runner.lifecycle.reconcile()
     runner.start()
+    if health_runner is not None:
+        health_runner.start()               # FR-12: ตรวจสุขภาพแม้ EVE เงียบ
     try:
         for event in event_source:
-            trace = pipeline.process(event)
-            print(
-                f"[EVENT] {trace['src_ip']} matched={trace['correlation_matched']} "
-                f"decision={trace['decision']}",
-                flush=True,
-            )
+            # NFR-02: event เดียวพังต้องไม่ล้มทั้ง engine — log แล้วไปตัวถัดไป
+            # (สถานะ enforcement ที่เกิดไปแล้วยังคงถูกต้องตามความจริงเสมอ)
+            try:
+                trace = pipeline.process(event)
+            except Exception as exc:                      # noqa: BLE001 — boundary กันล้ม
+                log.error("ประมวลผล event ไม่สำเร็จ (src_ip=%s): %s",
+                          event.get("src_ip"), exc, exc_info=exc)
+                continue
+            log.info("event src_ip=%s matched=%s decision=%s",
+                     trace["src_ip"], trace["correlation_matched"], trace["decision"])
     finally:
-        runner.stop()          # stop_event.set() + join -> thread จบสะอาด
+        # health ต้องถูกปิดให้ได้เสมอ แม้ lifecycle runner จะ stop ไม่สำเร็จ
+        try:
+            runner.stop()      # stop_event.set() + join -> thread จบสะอาด
+        finally:
+            if health_runner is not None:
+                health_runner.stop()
 
 
-def main():
-    pipeline, runner, _ = build_pipeline()
-    run(pipeline, runner, stream_events(PFSENSE_HOST))
+def parse_args(argv):
+    """--test-id / --run-id (FR-15) — ตรวจก่อนอ่าน config หรือแตะ pfSense
+
+    ไม่ระบุทั้งคู่ = production mode (ไม่บันทึก experiment_timestamps)
+    identity ผูกกับ process ตลอดอายุ -> 1 process ต่อ 1 test run"""
+    ap = argparse.ArgumentParser(description="ITIS runtime engine")
+    ap.add_argument("--test-id", help="T1..T11 — เปิดการบันทึก FR-15 ของ test run นี้")
+    ap.add_argument("--run-id", help="<test-id>-R<NN> เช่น T4-R03 (= generator --run 3)")
+    args = ap.parse_args(argv)
+    if (args.test_id is None) != (args.run_id is None):
+        ap.error("ต้องระบุ --test-id และ --run-id คู่กัน")
+    if args.test_id is not None:
+        try:
+            validate_identity(args.test_id, args.run_id)
+        except ExperimentIdentityError as exc:
+            ap.error(str(exc))
+    return args
+
+
+def main(argv=()):
+    args = parse_args(argv)
+    # อ่าน+validate config ให้ครบก่อน -> ค่าหาย/เสียจะพังก่อนแตะ pfSense หรือสร้าง db
+    settings = load_settings()
+    configure_from_settings(settings)       # NFR-03: log ลง logs/engine.log
+    log.info("เริ่ม ITIS engine (weight_set=%s, block_duration=%ss)",
+             settings.risk.weight_set, settings.block.duration_sec)
+    host = settings.pfsense_host()          # environment เท่านั้น (NFR-07)
+    eve_path = settings.require_eve_path()  # config.yaml หรือ ITIS_EVE_PATH
+    # repository ตัวเดียวกันทั้ง audit chain และ recovery_events (ไฟล์ DB เดียว §3.4)
+    repository = AuditRepository(settings.system.db_path)
+    trace_sink = None
+    if args.test_id is not None:
+        trace_sink = ExperimentTimestampSink(repository, args.test_id, args.run_id)
+        log.info("บันทึก FR-15 experiment_timestamps: test_id=%s run=%s",
+                 args.test_id, args.run_id)
+    pipeline, runner, _ = build_pipeline(
+        host=host,
+        db_path=settings.system.db_path,
+        min_events=settings.correlation.min_events,
+        window_max=float(settings.correlation.window_sec),
+        repository=repository,
+        trace_sink=trace_sink,
+        weight_set=settings.risk.weight_set,   # §3.5 — T11 เปลี่ยน set ผ่าน config
+    )
+    monitor, health_runner = build_health(settings, host=host, repository=repository)
+    run(pipeline, runner,
+        stream_events(host, eve_path, on_stats=monitor.on_stats),
+        health_runner=health_runner)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

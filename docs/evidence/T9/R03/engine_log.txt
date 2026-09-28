@@ -1,0 +1,42 @@
+2026-09-25T13:57:34Z INFO     run_phase4 :: เริ่ม ITIS engine (weight_set=A, block_duration=300s)
+2026-09-25T13:57:34Z INFO     run_phase4 :: บันทึก FR-15 experiment_timestamps: test_id=T9 run=T9-R03
+2026-09-25T13:57:34Z INFO     security_engine.ingestion.eve_reader :: เริ่มอ่าน EVE จาก admin@192.168.227.150:/var/log/suricata/suricata_em224404/eve.json
+2026-09-25T13:57:34Z DEBUG    security_engine.health.monitor :: Suricata health = HEALTHY (stats_age=0.2s)
+2026-09-25T13:57:35Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=20)
+2026-09-25T13:57:37Z DEBUG    security_engine.health.monitor :: ได้รับ EVE stats event (uptime=22)
+2026-09-25T13:57:49Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN, stats_age=12.0s/30s)
+2026-09-25T13:57:49Z WARNING  security_engine.health.recovery :: เริ่ม recovery Suricata attempt 1/3 (PROCESS_DOWN)
+2026-09-25T13:57:49Z ERROR    security_engine.health.suricata_controller :: restart Suricata ไม่สำเร็จที่ admin@192.168.227.150: rc=1: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+2026-09-25T13:57:50Z ERROR    security_engine.health.recovery :: recovery attempt 1/3 ล้มเหลว: rc=1: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+2026-09-25T13:57:50Z WARNING  security_engine.health.recovery :: เริ่ม recovery Suricata attempt 2/3 (PROCESS_DOWN)
+2026-09-25T13:57:50Z ERROR    security_engine.health.suricata_controller :: restart Suricata ไม่สำเร็จที่ admin@192.168.227.150: rc=1: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+2026-09-25T13:57:50Z ERROR    security_engine.health.recovery :: recovery attempt 2/3 ล้มเหลว: rc=1: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+2026-09-25T13:57:50Z WARNING  security_engine.health.recovery :: เริ่ม recovery Suricata attempt 3/3 (PROCESS_DOWN)
+2026-09-25T13:57:50Z ERROR    security_engine.health.suricata_controller :: restart Suricata ไม่สำเร็จที่ admin@192.168.227.150: rc=1: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html
+2026-09-25T13:57:50Z CRITICAL security_engine.health.recovery :: recovery Suricata ล้มครบ 3 ครั้ง (rc=1: ** WARNING: connection is not using a post-quantum key exchange algorithm.
+** This session may be vulnerable to "store now, decrypt later" attacks.
+** The server may need to be upgraded. See https://openssh.com/pq.html) — CRITICAL engine ทำงานต่อแต่ IDS อาจไม่ส่ง event แล้ว
+2026-09-25T13:58:05Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN, stats_age=27.9s/30s)
+2026-09-25T13:58:05Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+2026-09-25T13:58:20Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN;EVE_STALE, stats_age=43.1s/30s)
+2026-09-25T13:58:20Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+2026-09-25T13:58:36Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN;EVE_STALE, stats_age=58.2s/30s)
+2026-09-25T13:58:36Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+2026-09-25T13:58:51Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN;EVE_STALE, stats_age=73.4s/30s)
+2026-09-25T13:58:51Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+2026-09-25T13:59:06Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN;EVE_STALE, stats_age=88.6s/30s)
+2026-09-25T13:59:06Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+2026-09-25T13:59:21Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN;EVE_STALE, stats_age=103.7s/30s)
+2026-09-25T13:59:21Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
+2026-09-25T13:59:36Z WARNING  security_engine.health.monitor :: Suricata health = DEGRADED (PROCESS_DOWN;EVE_STALE, stats_age=118.9s/30s)
+2026-09-25T13:59:36Z ERROR    security_engine.health.runner :: Suricata ยังอยู่ในสถานะ CRITICAL (PROCESS_DOWN;EVE_STALE) — หยุด auto recovery รอการแก้ไขที่เครื่อง IDS
